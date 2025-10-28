@@ -21,11 +21,23 @@ else:
         def to(self, unit: str) -> "Quantity":
             return Quantity(_convert_unit(self.magnitude, self.unit, unit), unit)
 
+    class _Formatter:
+        def __init__(self, default_format: str) -> None:
+            self.default_format = default_format
+
     class UnitRegistry:  # pragma: no cover - trivial behaviour
         """Fallback registry supporting the minimal Pint API surface we rely on."""
 
         def __init__(self, *_: Any, **__: Any) -> None:
-            self.default_format = "~P"
+            self.formatter = _Formatter("~P")
+
+        @property
+        def default_format(self) -> str:  # pragma: no cover - compatibility shim
+            return self.formatter.default_format
+
+        @default_format.setter
+        def default_format(self, value: str) -> None:  # pragma: no cover - compatibility shim
+            self.formatter.default_format = value
 
         def Quantity(self, value: Any, unit: str) -> Quantity:
             return Quantity(float(value), unit)
@@ -77,12 +89,20 @@ def _convert_unit(value: float, from_unit: str, to_unit: str) -> float:
     raise ValueError(f"Unsupported conversion from '{from_unit}' to '{to_unit}'")
 
 
+def _set_default_format(registry: UnitRegistry, fmt: str) -> None:
+    formatter = getattr(registry, "formatter", None)
+    if formatter is not None and hasattr(formatter, "default_format"):
+        formatter.default_format = fmt
+    else:
+        setattr(registry, "default_format", fmt)
+
+
 @lru_cache(maxsize=1)
 def _build_registry() -> UnitRegistry:
     registry = UnitRegistry(auto_reduce_dimensions=True)
     if hasattr(registry, "setup_matplotlib"):
         registry.setup_matplotlib(True)
-    registry.default_format = "~P"
+    _set_default_format(registry, "~P")
     if hasattr(registry, "define"):
         registry.define("pct = 0.01 = percent")
     return registry
