@@ -9,19 +9,32 @@
 ## 0. 빠른 시작
 
 ```bash
-# 케이스 실행 (결과는 output/ 디렉터리에 저장)
-python run_case.py --case data/plant_case_summer_35C.json --out output/summer35
+# 1) Poetry 설치 (권장: pipx 사용)
+pipx install poetry
 
-# GUI 실행 (Tkinter 기반 다이어그램 편집기)
-python run_gui.py
+# 2) 의존성 설치
+poetry install
+
+# 3) 단일 케이스 실행 (산출물은 output/ 디렉터리에 저장)
+poetry run python run_case.py \
+  --case data/plant_case_summer_35C.json \
+  --out output/summer35
+
+# 4) GUI 실행 (Tkinter 기반 다이어그램 편집기)
+poetry run python run_gui.py
+
+# (선택) 케이스 행렬 실행 예시 - Appendix I 설계에 따라 추후 제공
+poetry run python run_grid.py --matrix cases.yml
 ```
 
 산출물은 `output/<case>` 디렉터리에 저장된다.
 
-- `<case>_result.json` – 최종 계산 결과 스냅샷
-- `<case>_calculations.json` – 단계별 계산 로그
-- `<case>.xlsx` – Summary/Streams/Calculations 시트
-- `<case>.svg` – GT→HRSG→ST→Condenser 흐름 다이어그램
+| 파일 | 설명 |
+| --- | --- |
+| `<case>_result.json` | 최종 계산 결과 스냅샷 (summary + meta) |
+| `<case>_calculations.json` | 단계별 계산 로그(ambient/GT/HRSG/ST/Condenser) |
+| `<case>.xlsx` | Summary/Streams/Calculations 시트를 포함한 Excel 리포트 |
+| `<case>.svg` | GT→HRSG→ST→Condenser 플로우 다이어그램 |
 
 ---
 
@@ -37,8 +50,11 @@ ccpp-hbd-solver/
 ├─ data/
 │   ├─ plant_case_summer_35C.json
 │   └─ plant_case_winter_5C.json
+├─ schema/
+│   └─ case.schema.json          # JSON Schema v0.2 명세
 ├─ docs/
-│   └─ architecture.md           # 내부 파이프라인 & 다이어그램 요약
+│   ├─ architecture.md           # 내부 파이프라인 & 다이어그램 요약
+│   └─ case_schema_v0.2.md       # 케이스 스키마 세부 정의
 ├─ src/
 │   └─ ccpp_hbd_solver/
 │       ├─ ambient/              # 외기 보정
@@ -77,8 +93,9 @@ ccpp-hbd-solver/
 ### 3.1 입력 JSON
 
 - 단위: 온도(°C), 압력(bar abs 또는 kPa abs), 유량(kg/s), 전력(MW).
-- 효율은 소수(0~1)로 입력. 보고서에서만 %로 표시.
-- 예제는 `data/plant_case_*.json` 참조. 누락된 값은 `defaults/defaults.json`의 기본값을 사용한다.
+- 효율은 소수(0~1)로 입력하며, 보고서에서만 %로 표시한다.
+- v0.2 스키마는 `fixed`/`vary`/`devices` 세 블록으로 구성된다. 자세한 정의는 [`docs/case_schema_v0.2.md`](docs/case_schema_v0.2.md)와 [`schema/case.schema.json`](schema/case.schema.json)을 참조한다.
+- 예제는 `data/plant_case_summer_35C.json`, `data/plant_case_winter_5C.json`에 제공되며, 누락된 값은 `defaults/defaults.json`의 기본값을 사용한다.
 
 ### 3.2 결과 구조
 
@@ -139,7 +156,38 @@ Tkinter 기반 다이어그램 편집기는 `DiagramCanvas`를 통해 한 화면
 
 ---
 
-## 7. 개발 노트
+## 7. 민감 정보 분리(벤더 커브)
+
+- 공개 저장소에는 벤더 곡선/보증치 등 민감 데이터를 커밋하지 않는다.
+- 런타임에 비공개 데이터를 병합할 때는 환경 변수나 CI 시크릿을 사용한다.
+
+예시 (GitHub Actions):
+
+```yaml
+- name: Run HBD case with vendor curves
+  run: |
+    mkdir -p private
+    echo "$VENDOR_CURVE_JSON" > private/gt_curves.json
+    poetry run python run_case.py \
+      --case data/plant_case_summer_35C.json \
+      --out output/summer35 \
+      --no-console
+  env:
+    VENDOR_CURVE_JSON: ${{ secrets.VENDOR_CURVE_JSON }}
+```
+
+예시 (로컬 실행):
+
+```bash
+export DATA_SECRET_PATH=$HOME/hbd_secrets
+poetry run python run_case.py --case data/plant_case_summer_35C.json --out output/summer35
+```
+
+`ccpp_hbd_solver.pipeline.load_defaults` 이후에 비밀 데이터를 로드하여 병합하면 코어 솔버는 동일한 인터페이스를 유지하면서 민감정보를 분리할 수 있다.
+
+---
+
+## 8. 개발 노트
 
 - Python 3.11 이상, Poetry 프로젝트 구조 (`pyproject.toml`).
 - 모든 solver는 순수 함수 스타일을 유지하고, 전역 mutable 상태를 사용하지 않는다.
@@ -148,7 +196,7 @@ Tkinter 기반 다이어그램 편집기는 `DiagramCanvas`를 통해 한 화면
 
 ---
 
-## 8. 참고 자료
+## 9. 참고 자료
 
 - 내부 파이프라인과 GUI 구성도: `docs/architecture.md`
 - 에이전트 동작 규약: `agent.md`
