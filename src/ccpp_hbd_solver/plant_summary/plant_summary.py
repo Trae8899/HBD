@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Tuple
 
+from ..utils.warnings import format_warning
+
 
 def summarize_plant(blocks: Mapping[str, Any], metadata: Mapping[str, Any]) -> Tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Compose plant-wide metrics, convergence status, and metadata."""
@@ -25,7 +27,7 @@ def summarize_plant(blocks: Mapping[str, Any], metadata: Mapping[str, Any]) -> T
     closure_error_pct = (
         abs(fuel_heat_input - expected_heat_out) / fuel_heat_input * 100.0 if fuel_heat_input else 0.0
     )
-    convergence_ok = closure_error_pct <= 0.5 and bool(hrsg_block.get("converged", True))
+    convergence_ok = closure_error_pct <= 0.3 and bool(hrsg_block.get("converged", True))
 
     summary = {
         "GT_power_MW": gt_power,
@@ -49,10 +51,12 @@ def summarize_plant(blocks: Mapping[str, Any], metadata: Mapping[str, Any]) -> T
     }
 
     warnings = []
-    if not convergence_ok:
-        warnings.append(
-            "Mass/energy balance closure exceeds 0.5% tolerance"
-        )
+    if closure_error_pct > 0.5:
+        warnings.append(format_warning("CLOSURE_GT_0P5", f"{closure_error_pct:.3f}%"))
+    elif closure_error_pct > 0.3:
+        warnings.append(format_warning("CLOSURE_NEAR_LIMIT", f"{closure_error_pct:.3f}%"))
+    if not bool(hrsg_block.get("converged", True)):
+        warnings.append(format_warning("HRSG_PINCH_VIOLATION", "See HRSG warnings"))
 
     trace = {
         "meta": meta,

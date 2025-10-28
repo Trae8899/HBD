@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import sys
 from pathlib import Path
@@ -53,11 +54,34 @@ def load_case(case_path: Path) -> dict[str, Any]:
 
 
 def _prepare_case(case_data: dict[str, Any], case_path: Path) -> dict[str, Any]:
-    case_with_meta = dict(case_data)
-    meta = dict(case_with_meta.get("meta", {}))
-    meta.setdefault("input_case", case_path.name)
-    case_with_meta["meta"] = meta
-    return case_with_meta
+    """Normalize legacy and v0.2 case layouts into a single merged dict."""
+
+    base_meta = dict(case_data.get("meta", {}))
+    base_meta.setdefault("input_case", case_path.name)
+
+    if "fixed" in case_data:
+        fixed_case = copy.deepcopy(case_data["fixed"])
+        fixed_meta = dict(base_meta)
+        fixed_meta.setdefault(
+            "case_schema_version",
+            str(case_data.get("schema_version", case_data.get("version", "0.3"))),
+        )
+        if case_data.get("devices"):
+            fixed_meta["declared_devices"] = copy.deepcopy(case_data["devices"])
+        if case_data.get("vary"):
+            fixed_meta["declared_vary_axes"] = list(case_data["vary"].keys())
+        fixed_case["meta"] = fixed_meta
+        fixed_case["case_constraints"] = copy.deepcopy(case_data.get("constraints", {}))
+        fixed_case["declared_devices"] = copy.deepcopy(case_data.get("devices", []))
+        fixed_case["schema_version"] = case_data.get("schema_version", case_data.get("version"))
+        fixed_case["units_system"] = case_data.get("units_system", "SI_IF97")
+        return fixed_case
+
+    legacy_case = copy.deepcopy(case_data)
+    legacy_meta = dict(legacy_case.get("meta", {}))
+    legacy_meta.update(base_meta)
+    legacy_case["meta"] = legacy_meta
+    return legacy_case
 
 
 def _write_result_json(result: Mapping[str, Any], output_path: Path) -> Path:

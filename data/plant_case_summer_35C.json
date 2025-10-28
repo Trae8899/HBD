@@ -1,54 +1,98 @@
 {
-  "ambient": {
-    "Ta_C": 35.0,
-    "RH_pct": 55.0,
-    "P_bar": 1.005
-  },
-  "gas_turbine": {
-    "model": "GTX-400",
-    "ISO_power_MW": 270.0,
-    "ISO_heat_rate_kJ_per_kWh": 10000.0,
-    "fuel_LHV_kJ_per_kg": 49000.0,
-    "ISO_exhaust_temp_C": 610.0,
-    "ISO_exhaust_flow_kg_s": 650.0,
-    "corr_coeff": {
-      "dPower_pct_per_K": -0.30,
-      "dFlow_pct_per_K": -0.15,
-      "dExhT_K_per_K": 0.50
+  "schema_version": "0.3",
+  "units_system": "SI_IF97",
+  "fixed": {
+    "plant": {
+      "topology": "single-shaft-1x1",
+      "site_name": "Summer Reference"
+    },
+    "ambient": {
+      "Ta_C": 35.0,
+      "RH_pct": 55.0,
+      "P_bar": 1.005
+    },
+    "gas_turbine": {
+      "model": "GTX-400",
+      "ISO_power_MW": 270.0,
+      "ISO_heat_rate_kJ_per_kWh": 10000.0,
+      "fuel_LHV_kJ_per_kg": 49000.0,
+      "ISO_exhaust_temp_C": 610.0,
+      "ISO_exhaust_flow_kg_s": 650.0,
+      "corr_coeff": {
+        "reference_temp_C": 15.0,
+        "dPower_pct_per_K": -0.3,
+        "dFlow_pct_per_K": 0.15,
+        "dExhT_K_per_K": 0.5
+      },
+      "performance_blend": {
+        "mode": "vendor_blend",
+        "vendor_curve_id": "GTX-400-SUMMER",
+        "blend_weight": 0.6
+      }
+    },
+    "hrsg": {
+      "hp": {
+        "pressure_bar": 120.0,
+        "steam_temp_C": 565.0,
+        "pinch_K": 10.0,
+        "approach_K": 5.0
+      },
+      "ip": {
+        "pressure_bar": 30.0,
+        "steam_temp_C": 565.0,
+        "pinch_K": 12.0,
+        "approach_K": 7.0
+      },
+      "lp": {
+        "pressure_bar": 5.0,
+        "steam_temp_C": 250.0,
+        "pinch_K": 15.0,
+        "approach_K": 10.0
+      },
+      "stack_temp_min_C": 90.0,
+      "constraints": {
+        "pinch_mode": "enforce",
+        "approach_mode": "enforce",
+        "stack_mode": "enforce"
+      },
+      "devices": {
+        "duct_burner": {
+          "duty_MW": 15.0,
+          "stack_temp_cap_C": 125.0
+        },
+        "bypass": {
+          "fraction": 0.05
+        },
+        "attemperators": [
+          {
+            "target": "hp",
+            "steam_temp_C": 560.0,
+            "m_dot_max_kg_s": 4.0
+          }
+        ]
+      }
+    },
+    "steam_turbine": {
+      "isentropic_eff_hp": 0.88,
+      "isentropic_eff_ip": 0.88,
+      "isentropic_eff_lp": 0.88,
+      "mech_elec_eff": 0.985
+    },
+    "condenser": {
+      "vacuum_kPa_abs": 8.0,
+      "cw_inlet_C": 20.0
+    },
+    "bop": {
+      "aux_load_MW": 5.0
     }
   },
-  "hrsg": {
-    "hp": {
-      "pressure_bar": 120.0,
-      "steam_temp_C": 565.0,
-      "pinch_K": 10.0,
-      "approach_K": 5.0
-    },
-    "ip": {
-      "pressure_bar": 30.0,
-      "steam_temp_C": 565.0,
-      "pinch_K": 12.0,
-      "approach_K": 7.0
-    },
-    "lp": {
-      "pressure_bar": 5.0,
-      "steam_temp_C": 250.0,
-      "pinch_K": 15.0,
-      "approach_K": 10.0
-    },
-    "stack_temp_min_C": 90.0
+  "vary": {},
+  "devices": [],
+  "constraints": {
+    "allow_relaxed_pinch": false,
+    "allow_relaxed_stack": false
   },
-  "steam_turbine": {
-    "isentropic_eff_hp": 0.88,
-    "isentropic_eff_ip": 0.88,
-    "isentropic_eff_lp": 0.88,
-    "mech_elec_eff": 0.985
-  },
-  "condenser": {
-    "vacuum_kPa_abs": 8.0,
-    "cw_inlet_C": 20.0
-  },
-  "bop": {
-    "aux_load_MW": 5.0
+  "meta": {
+    "description": "Summer 35°C reference case"
   }
 }

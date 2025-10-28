@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Tuple
 
+from ..utils.physical_props import load_vendor_curve
+
 
 def solve_gt_block(inputs: Mapping[str, Any]) -> Tuple[dict[str, Any], dict[str, Any]]:
     """Derive gas turbine output, fuel heat input, and exhaust conditions."""
@@ -20,6 +22,26 @@ def solve_gt_block(inputs: Mapping[str, Any]) -> Tuple[dict[str, Any], dict[str,
     power_multiplier = float(corrections.get("power_multiplier", 1.0))
     flow_multiplier = float(corrections.get("flow_multiplier", 1.0))
     exhaust_temp_delta = float(corrections.get("exhaust_temp_delta_C", 0.0))
+
+    vendor_notes: list[str] = []
+    blend_spec = gas_turbine.get("performance_blend")
+    if isinstance(blend_spec, Mapping):
+        mode = str(blend_spec.get("mode", "linear"))
+        blend_weight = float(blend_spec.get("blend_weight", 1.0))
+        vendor_curve_id = blend_spec.get("vendor_curve_id")
+        if mode == "vendor_blend" and vendor_curve_id:
+            vendor_curve = load_vendor_curve(str(vendor_curve_id))
+            if vendor_curve:
+                delta_power = float(vendor_curve.get("delta_power_pct", 0.0)) * blend_weight
+                delta_flow = float(vendor_curve.get("delta_flow_pct", 0.0)) * blend_weight
+                delta_exhaust = float(vendor_curve.get("delta_exhaust_temp_C", 0.0)) * blend_weight
+                power_multiplier *= 1.0 + delta_power / 100.0
+                flow_multiplier *= 1.0 + delta_flow / 100.0
+                exhaust_temp_delta += delta_exhaust
+            else:
+                vendor_notes.append(f"Vendor curve '{vendor_curve_id}' not resolved")
+        elif mode not in {"linear", "vendor_blend"}:
+            vendor_notes.append(f"Unknown performance blend mode '{mode}'")
 
     electric_power = iso_power * power_multiplier
     exhaust_flow = iso_exhaust_flow * flow_multiplier
@@ -42,6 +64,13 @@ def solve_gt_block(inputs: Mapping[str, Any]) -> Tuple[dict[str, Any], dict[str,
             "power_multiplier": power_multiplier,
             "flow_multiplier": flow_multiplier,
             "temperature_offset_C": exhaust_temp_delta,
+            "vendor_blend": {
+                "mode": blend_spec.get("mode") if isinstance(blend_spec, Mapping) else None,
+                "vendor_curve_id": blend_spec.get("vendor_curve_id") if isinstance(blend_spec, Mapping) else None,
+                "notes": vendor_notes,
+            }
+            if isinstance(blend_spec, Mapping)
+            else None,
         },
     }
 
@@ -60,6 +89,7 @@ def solve_gt_block(inputs: Mapping[str, Any]) -> Tuple[dict[str, Any], dict[str,
             "fuel_LHV_kJ_per_kg": fuel_lhv_value,
             "fuel_flow_kg_s": fuel_flow,
         },
+        "vendor_notes": vendor_notes,
     }
 
     return result, trace

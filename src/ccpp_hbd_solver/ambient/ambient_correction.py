@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from ..utils.physical_props import humid_air_props
+
 
 ISO_REFERENCE_TEMP_C = 15.0
 
@@ -21,6 +23,8 @@ def apply_site_corrections(ambient: Mapping[str, Any], corr_coeff: Mapping[str, 
     flow_correction_pct = flow_pct_per_K * delta_temp
     exhaust_delta_C = exhaust_delta_per_K * delta_temp
 
+    humid_air = humid_air_props(site_temp, float(ambient.get("RH_pct", 60.0)), float(ambient.get("P_bar", 1.013)))
+
     return {
         "site_temperature_C": site_temp,
         "delta_T_K": delta_temp,
@@ -29,4 +33,5 @@ def apply_site_corrections(ambient: Mapping[str, Any], corr_coeff: Mapping[str, 
         "exhaust_temp_delta_C": exhaust_delta_C,
         "power_multiplier": 1.0 + power_correction_pct / 100.0,
         "flow_multiplier": 1.0 + flow_correction_pct / 100.0,
+        "humid_air": humid_air,
     }

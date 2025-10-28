@@ -1,326 +1,202 @@
 # CCPP HBD Solver
 
-복합화력(CCPP) 3압력 HRSG Heat Balance Data(HBD) 자동화 엔진
+복합화력(CCPP) 3압력 HRSG Heat Balance Data(HBD) 자동화 엔진.
+
+이 프로젝트는 외기 조건, 가스터빈(GT) 성능, HRSG pinch/approach, 복수기 조건 등을 입력으로 받아 열수지 계산과 보고서(Excel, SVG)를 자동 생성한다. 계산 코어는 순수 함수 스타일로 작성되어 CLI와 GUI에서 동일한 파이프라인을 재사용한다.
 
 ---
 
-## 0. 목적
+## 0. 빠른 시작
 
-이 저장소는 복합화력 발전소(CCPP)의 3압력 HRSG(HP/IP/LP) 사이클에 대한 열수지(Heat Balance Data)를 자동으로 계산하고,
-정형화된 보고서(Excel, SVG 다이어그램 등)를 생성하는 파이프라인을 제공합니다.
+```bash
+# 1) Poetry 설치 (권장: pipx 사용)
+pipx install poetry
 
-우리가 풀고 싶은 문제:
+# 2) 의존성 설치
+poetry install
 
-- 외기 조건, 가스터빈(GT) 성능, HRSG pinch/approach, 복수기 조건 등이 바뀔 때마다 엔지니어가 수동으로 열수지 계산과 표 작성하는 반복 업무를 없앤다.
-- 벤더 A vs 벤더 B, 여름 vs 겨울, 복수기 진공 조건 변화 등 다양한 "케이스"를 JSON으로 저장하고 언제든 재현 가능하게 만든다.
-- 계약 검토/성능 검증 시 "우리가 사용한 기준 HBD"를 근거 있는 수치로 바로 뽑아낸다.
+# 3) 단일 케이스 실행 (산출물은 output/ 디렉터리에 저장)
+poetry run python run_case.py \
+  --case data/plant_case_summer_35C.json \
+  --out output/summer35
+
+# 4) GUI 실행 (Tkinter 기반 다이어그램 편집기)
+poetry run python run_gui.py
+
+# (선택) 케이스 행렬 실행 예시 - Appendix I 설계에 따라 추후 제공
+poetry run python run_grid.py --matrix cases.yml
+```
+
+산출물은 `output/<case>` 디렉터리에 저장된다.
+
+| 파일 | 설명 |
+| --- | --- |
+| `<case>_result.json` | 최종 계산 결과 스냅샷 (summary + meta) |
+| `<case>_calculations.json` | 단계별 계산 로그(ambient/GT/HRSG/ST/Condenser) |
+| `<case>.xlsx` | Summary/Streams/Calculations 시트를 포함한 Excel 리포트 |
+| `<case>.svg` | GT→HRSG→ST→Condenser 플로우 다이어그램 |
 
 ---
 
-## 1. 시스템 구성
-
-### 1.1 디렉토리 구조 (초기 설계안)
+## 1. 디렉터리 구조
 
 ```
 ccpp-hbd-solver/
 ├─ README.md
 ├─ agent.md
+├─ AGENTS.md
 ├─ defaults/
-│   └─ defaults.json                # 기본 가정치 모음 (pinch, eff 등)
+│   └─ defaults.json             # 기본 가정치 (효율, pinch 등)
 ├─ data/
-│   ├─ plant_case_summer_35C.json   # 케이스 입력 예시
+│   ├─ plant_case_summer_35C.json
 │   └─ plant_case_winter_5C.json
+├─ schema/
+│   └─ case.schema.json          # JSON Schema v0.2 명세
+├─ docs/
+│   ├─ architecture.md           # 내부 파이프라인 & 다이어그램 요약
+│   └─ case_schema_v0.2.md       # 케이스 스키마 세부 정의
 ├─ src/
-│   ├─ ambient/
-│   │   └─ ambient_correction.py    # 외기조건 보정 로직
-│   ├─ gt_block/
-│   │   └─ gt_solver.py             # 가스터빈 성능/연료/배기가스 계산
-│   ├─ hrsg_block/
-│   │   └─ hrsg_solver.py           # 3압력 HRSG 열수지 반복 수렴
-│   ├─ st_block/
-│   │   └─ st_solver.py             # HP/IP/LP 스팀터빈 팽창 출력 계산
-│   ├─ condenser_loop/
-│   │   └─ condenser_solver.py      # 복수기/급수 루프 질량·에너지 수지
-│   ├─ plant_summary/
-│   │   └─ plant_summary.py         # Net MW, 효율, 밸런스 클로저 등 집계
-│   ├─ reporter/
-│   │   ├─ excel_reporter.py        # Summary/Streams 시트 작성
-│   │   └─ diagram_svg.py           # 블록 다이어그램 SVG 생성
-│   └─ utils/
-│       ├─ steam_props.py           # IAPWS-IF97 기반 물/증기 물성 계산
-│       └─ unit_helpers.py          # 단위 변환, 라운딩 등
-├─ run_case.py                      # CLI 엔트리포인트
-├─ run_gui.py                       # Tkinter GUI 실행 스크립트
-└─ output/
-    ├─ sample_case.xlsx
-    └─ sample_case.svg
+│   └─ ccpp_hbd_solver/
+│       ├─ ambient/              # 외기 보정
+│       ├─ gt_block/             # GT 출력/연료/배기가스 계산
+│       ├─ hrsg_block/           # 3압력 HRSG 수렴 로직
+│       ├─ st_block/             # 스팀터빈 팽창 계산
+│       ├─ condenser_loop/       # 복수기 및 급수 루프
+│       ├─ plant_summary/        # Net MW, 효율, closure 계산
+│       ├─ reporter/             # Excel/SVG/콘솔 출력
+│       ├─ ui/                   # Tkinter 다이어그램 GUI
+│       └─ utils/                # 단위 변환, 물성 헬퍼
+├─ run_case.py                   # CLI 엔트리포인트
+├─ run_gui.py                    # GUI 런처
+└─ pyproject.toml
 ```
 
-### 1.2 실행 흐름
+---
 
-1. `run_case.py --case data/plant_case_summer_35C.json --out output/summer_35C`
-2. `run_case.py`는 다음 순서로 동작한다:
-   - 입력 JSON 로드 → defaults 병합
-   - `ambient_correction.py`와 `gt_solver.py`로 실제 GT 운전점 산출
-   - `hrsg_solver.py`로 HP/IP/LP 증기유량 수렴 (pinch/approach 반영)
-   - `st_solver.py`로 스팀터빈 출력 계산
-   - `condenser_solver.py`로 복수기/급수 루프 닫고 mass balance 확인
-   - `plant_summary.py`로 Net MW/효율 산정
-   - 결과 dict에 메타데이터(케이스명, commit hash, timestamp, 수렴여부) 부착
-   - `excel_reporter.py` / `diagram_svg.py` 호출해 보고서 산출
-3. 산출물:
-   - `output/<case_name>.xlsx` → Summary / Streams 시트
-   - `output/<case_name>.svg` → GT→HRSG(HP/IP/LP)→ST→Condenser 블록다이어그램
+## 2. 실행 흐름 (내부 로직)
 
-### 1.3 데스크톱 GUI
+입력 JSON은 기본값과 병합 후 다음 순서로 처리된다. 세부 내용은 `docs/architecture.md` 참조.
 
-CLI와 동일한 파이프라인을 Tkinter 기반 GUI로도 제공한다. GUI는 입력 편집, 실시간 결과 확인, 리포트 내보내기를 한 화면에서 수행할 수 있도록 구성되어 있다.
+1. **Ambient 보정** – 외기 온도/습도/압력에 따른 보정계수 계산 (`ambient/ambient_correction.py`).
+2. **Gas Turbine** – 보정 계수를 적용해 실제 전기출력, 연료 열투입, 배기가스 상태 계산 (`gt_block/gt_solver.py`).
+3. **HRSG** – HP/IP/LP 증기 유량을 에너지 가중치 기반으로 배분하고 굴뚝 최소온도를 만족시키도록 조정 (`hrsg_block/hrsg_solver.py`).
+4. **Steam Turbine** – 각 섹션 등엔트로피 효율을 적용해 발전량 계산, 기계/발전기 효율 반영 (`st_block/st_solver.py`).
+5. **Condenser Loop** – LP 배기 증기를 응축시키고 냉각수 열부하/출구온도를 산출 (`condenser_loop/condenser_solver.py`).
+6. **Plant Summary** – Net MW, %LHV, closure error, 경고 메시지를 집계 (`plant_summary/plant_summary.py`).
 
-1. 실행: `python run_gui.py`
-2. 주요 기능:
-   - **입력 편집 탭**: Ambient, Gas Turbine, HRSG, Steam Turbine, Condenser, Balance of Plant 항목을 탭별 폼으로 편집.
-   - **케이스 관리**: JSON 케이스 불러오기/저장, 기본값으로 초기화, 케이스 이름 지정.
-   - **결과 뷰어**: Summary, GT, HRSG, ST, Condenser, Mass Balance, Calculation Trace를 트리/텍스트 뷰로 확인.
-   - **보고서 내보내기**: Excel, SVG, 계산 추적(JSON), 결과(JSON)를 선택한 디렉터리에 즉시 저장.
-3. 실행 흐름:
-   - 케이스 값을 입력하거나 `Load case…`로 JSON을 불러온다.
-   - `Run solver`를 눌러 계산 결과를 확인한다.
-   - 필요 시 `Export reports`로 산출물을 저장한다.
-
-GUI를 통해 입력-출력 관계를 빠르게 검토하고, 계산 과정(trace)도 즉시 확인할 수 있다.
-
-### 1.4 GUI 입력 필드 설명
-
-입력 탭에는 영문 레이블과 함께 한국어 설명이 병기되어 있으며, 각 값의 단위와 의미는 아래와 같다.
-
-- **Ambient**
-  - `Dry-bulb temperature (°C)` – 외기 건구 온도.
-  - `Relative humidity (%)` – 외기 상대습도(0~100%).
-  - `Ambient pressure (bar abs)` – 현장 대기압(절대압 기준).
-- **Gas Turbine**
-  - `GT model` – 가스터빈 기기 모델명.
-  - `ISO gross power (MW)` – ISO 조건(15°C, 60%RH, 1.013 bar)에서의 정격 발전기출력.
-  - `ISO heat rate (kJ/kWh)` – ISO 조건에서의 열소비율(저위발열량 기준).
-  - `Fuel LHV (kJ/kg)` – 사용 연료의 저위발열량(LHV). 천연가스는 약 48,000~50,000 kJ/kg 범위.
-  - `ISO exhaust temp (°C)` – ISO 조건의 배기가스 온도.
-  - `ISO exhaust flow (kg/s)` – ISO 조건의 배기가스 질량유량.
-  - `ΔPower (%/K)` – 외기 온도 변화 1K 당 전기출력 변화율.
-  - `ΔFlow (%/K)` – 외기 온도 변화 1K 당 배기가스 유량 변화율.
-  - `ΔExhaust temp (K/K)` – 외기 온도 변화 1K 당 배기가스 온도 변화량.
-- **HRSG**
-  - 각 압력 레벨(HP/IP/LP)의 `pressure`, `steam temp`, `pinch`, `approach` 값은 각각 증기 압력, 과열온도, pinch temperature difference, approach temperature difference를 의미한다.
-  - `Minimum stack temp (°C)` – 굴뚝 최소 허용 배출 온도.
-- **Steam Turbine**
-  - `HP/IP/LP isentropic efficiency` – 각 압력단 증기터빈의 등엔트로피 효율(0~1).
-  - `Mechanical & generator efficiency` – 터빈축 → 발전기까지의 기계/전기 효율.
-- **Condenser**
-  - `Condenser vacuum (kPa abs)` – 복수기 내부 절대압.
-  - `Cooling water inlet (°C)` – 복수기 순환수 입구온도.
-- **Balance of Plant**
-  - `Auxiliary load (MW)` – 플랜트 자체 전력 소비량(AUX load).
+모든 단계는 입력을 변경하지 않고 결과/추적 데이터를 반환한다. `PipelineArtifacts`는 `result`, `trace`, `merged_case`를 묶어 CLI와 GUI가 동일한 출력을 공유하도록 한다.
 
 ---
 
-## 2. 단위·기준
+## 3. 입력/출력 계약
 
-### 2.1 단위
+### 3.1 입력 JSON
 
-- 온도: °C
-- 압력: bar(abs) 또는 kPa(abs). 변수명에 `_abs` 명시
-- 유량: kg/s
-- 엔탈피/엔트로피: kJ/kg, kJ/kg-K
-- 전력: MW
-- 효율: % (리포트 단계에서만 %로 포맷)
+- 단위: 온도(°C), 압력(bar abs 또는 kPa abs), 유량(kg/s), 전력(MW).
+- 효율은 소수(0~1)로 입력하며, 보고서에서만 %로 표시한다.
+- v0.2 스키마는 `fixed`/`vary`/`devices` 세 블록으로 구성된다. 자세한 정의는 [`docs/case_schema_v0.2.md`](docs/case_schema_v0.2.md)와 [`schema/case.schema.json`](schema/case.schema.json)을 참조한다.
+- 예제는 `data/plant_case_summer_35C.json`, `data/plant_case_winter_5C.json`에 제공되며, 누락된 값은 `defaults/defaults.json`의 기본값을 사용한다.
 
-코드 내부 계산은 효율을 항상 소수(0.0 ~ 1.0)로 유지하고, reporter에서만 곱하기 100 후 %로 표현한다.
+### 3.2 결과 구조
 
-### 2.2 열역학 표준
-
-- 스팀(물/증기) 성질은 IAPWS-IF97 계열 공식(또는 동등 정확도의 라이브러리)을 사용한다.
-- 엔탈피, 엔트로피, 비열(cp), 포화조건 등은 하드코딩하지 않고 `utils/steam_props.py`를 통해 호출한다.
-- GT 연료 투입량, 배기가스 조건 등은 가스터빈 블록에서만 책임진다. 다른 블록이 임의로 재계산하지 않는다.
-
----
-
-## 3. 수렴 규칙
-
-### 3.1 HRSG 반복 수렴
-
-- 목표: HP/IP/LP 스팀 유량을 찾는다.
-- 입력: GT 배기가스 유량/온도, 각 압력레벨의 목표 압력/과열온도, pinch/approach, 최소 굴뚝온도.
-- 방법:
-  1. HP 유량 가정 → 필요 열량 Q_req_HP 계산
-  2. 배기가스에서 회수 가능한 Q_avail을 계산하고 pinch/approach 위반 여부 확인
-  3. HP 유량을 조정해 만족시키면, 남은 배기가스 열량으로 IP 반복
-  4. IP 정리 후 남은 열량으로 LP 반복
-  5. 전체 질량/에너지 밸런스 에러율이 허용 범위(기본 0.5% 이하)일 때까지 루프
-- 최대 반복 횟수는 코드 상수(`MAX_ITER_HRSG`, 초기 제안값 50).
-- 수렴 실패 시에도 partial result를 기록하고, `converged=false`로 결과에 남긴다.
-
-### 3.2 전 플랜트 밸런스
-
-- 모든 블록을 통과한 뒤, 전체 질량/에너지 밸런스 에러율(`closure_error_pct`)을 계산한다.
-- 허용 기준: 0.5% 이하.
-- 초과일 경우 `mass_energy_balance.converged=false`.
-
-### 3.3 주요 계산식
-
-- **연료 열투입 (Fuel heat input)**: `fuel_heat_input_MW_LHV = ISO_heat_rate_kJ_per_kWh × GT_electric_power_MW / 3600`.
-- **연료 질량유량 (Fuel flow)**: 연료 LHV가 입력된 경우 `fuel_flow_kg_s = fuel_heat_input_MW_LHV × 1000 / fuel_LHV_kJ_per_kg`.
-- **Net 전력**: `NET_power_MW = GT_power_MW + ST_power_MW - AUX_load_MW`.
-- **Net 효율 (%LHV)**: `NET_eff_LHV_pct = (NET_power_MW / fuel_heat_input_MW_LHV) × 100`.
-- **질량/에너지 밸런스 오차**: `closure_error_pct = |fuel_heat_input_MW_LHV - (GT_power_MW + ST_power_MW + condenser_heat_MW)| / fuel_heat_input_MW_LHV × 100`.
-- **경고 조건**: `closure_error_pct > 0.5%` 또는 HRSG 수렴 실패 시 `mass_energy_balance.converged = false`로 기록한다.
-
----
-
-## 4. 보안과 민감도
-
-### 4.1 Vendor 커브 / 보증 파라미터
-
-- GT 성능 커브(외기온도에 따른 출력 감소율 등), HRSG pinch/approach, ST 효율 커브 등은 상업적 민감 정보다.
-- 이 값들은 `data/*.json` 파일에 들어가며, 이 JSON은 사내 기밀로 취급한다.
-- 공개 Repo에는 예제/더미 값만 올린다. 실제 값은 별도 private Repo 또는 사내 Vault에서 관리하고 CI/CD로 주입한다.
-
-### 4.2 리포트 내 정보 최소화
-
-- Reporter는 계약/협상에 필요한 요약치만 담는다.
-- 벤더명, 상세 커브 raw data 등은 넣지 않는다.
-- 메타데이터(케이스 파일명, commit hash, timestamp)는 항상 Summary 시트 하단에 박는다. 추적성은 확보하되, 민감 계산근거는 노출하지 않는다.
-
----
-
-## 5. 코드 개발 지침
-
-### 5.1 언어 / 런타임
-
-- Python 3.11 이상 가정.
-- 외부 라이브러리:
-  - 수치 해석: `math`, `numpy` 등 기본 범위
-  - 물성치: IAPWS-IF97 계열 혹은 동등 수준 구현
-  - Excel 생성: `openpyxl` 또는 유사 라이브러리
-  - SVG 생성: 표준 Python string 템플릿 기반 (추가 의존성 최소화)
-- 외부 라이브러리는 실제 환경 정책에 따라 조정 가능. 외부 의존성은 반드시 Poetry로 관리한다.
-
-### 5.2 모듈 책임 분리
-
-각 모듈은 다음 형태를 지킨다:
-
-```python
-def solve_xxx(input_dict: dict) -> dict:
-    """
-    input_dict: 모듈 입력
-    return: 계산 결과 dict (순수 값만; 부수효과 없음)
-    """
-```
-
-전역 mutable 상태 금지. I/O만으로 동작.
-
-### 5.3 예외 / 에러 처리
-
-- 수렴 실패, 비현실적 입력 등은 `raise` 대신 `converged=false`로 결과 dict에 기록.
-- 절대 Silent Fail 금지. 항상 meta에 이유를 적는다. 예:
+`run_pipeline()`은 다음 구조의 dict를 반환한다.
 
 ```json
-"meta": {
-  "warnings": [
-    "Condenser vacuum below 5 kPa_abs is outside validated range"
-  ]
+{
+  "summary": {"GT_power_MW": ..., "NET_power_MW": ..., "NET_eff_LHV_pct": ...},
+  "gt_block": {...},
+  "hrsg_block": {..., "converged": true},
+  "st_block": {...},
+  "condenser_block": {...},
+  "mass_energy_balance": {"closure_error_pct": 0.32, "converged": true},
+  "meta": {
+    "input_case": "plant_case_summer_35C.json",
+    "timestamp_utc": "2024-05-01T10:42:03Z",
+    "solver_commit": "<git hash>",
+    "warnings": []
+  }
 }
 ```
 
-### 5.4 라운딩과 표시
-
-- 내부 계산은 가능한 한 full precision 유지.
-- Reporter에서만 사람이 읽는 값으로 라운딩한다.
-  - 온도: 1 decimal °C
-  - 압력: 0.1 bar abs
-  - 유량: 0.1 kg/s
-  - 전력: 0.1 MW
-  - 효율: 0.1 %
-- 라운딩 규칙은 reporter 모듈에 상수로 모아둔다.
-
-### 5.5 커밋 메시지 규약
-
-- `feat(hrsg): add 3-pressure pinch solver`
-- `fix(st): correct isentropic expansion for IP section`
-- `refactor(reporter): move rounding logic to constants`
-- `chore(defaults): update default pinch for HP from 10K to 9K`
-
-형식: `<type>(<module>): <short summary>`
-
-### 5.6 브랜치 운용 (초기 제안)
-
-- `main`: 검증된 상태. 보고서에 직접 사용할 수 있는 버전만.
-- `dev/*`: 기능 개발 브랜치. 예: `dev/hrsg-solver`.
-- PR시 요구사항:
-  - 최소 1명 리뷰
-  - 수렴 안정성(closure_error_pct ≤ 0.5%) 유지되는지 케이스 1개 이상으로 확인 스크린샷/엑셀 첨부
+closure error가 0.5%를 초과하거나 HRSG가 수렴하지 못하면 `converged`가 `false`로 내려가고 경고 메시지가 `meta.warnings`에 추가된다.
 
 ---
 
-## 6. 사용 예시
+## 4. CLI 사용법 (`run_case.py`)
 
 ```bash
-# 1) 케이스 파일 준비
-cp data/plant_case_summer_35C.json data/tmp_case.json
-# tmp_case.json 안에서 외기온도, 복수기 진공 등 수정
-
-# 2) 실행 (콘솔 요약 + 계산 로그 경로 표시)
-python run_case.py --case data/tmp_case.json --out output/tmp_case --show-steps
-
-# 3) 산출 확인
-ls output/tmp_case
-  tmp_case.xlsx
-  tmp_case.svg
-  tmp_case_calculations.json
-  tmp_case_result.json
+python run_case.py --case <case.json> --out <output-dir> [--show-steps] [--no-console]
 ```
 
-- 콘솔에는 입력 요약, GT/HRSG/ST/Condenser 블록별 주요 지표, 수렴 정보가 섹션별로 표기된다.
-- `tmp_case.xlsx`의 Summary 시트 하단에는 입력 케이스 파일명, solver commit hash, UTC timestamp, converged 여부가 자동으로 기록된다.
-- `tmp_case_calculations.json`에는 각 블록별 계산 로그가 JSON 구조로 저장되어 추적성을 확보한다.
-- `tmp_case.svg`는 GT→HRSG→ST→Condenser 블록 다이어그램과 주요 유량/전력 값을 함께 나타낸다.
+- `--show-steps`: 콘솔에 요약 + trace 위치를 출력
+- `--no-console`: 콘솔 요약 생략 (CI에서 사용)
+
+CLI는 항상 Excel, SVG, 계산 로그 JSON, 결과 JSON을 함께 생성한다.
 
 ---
 
-## 7. 책임 범위 / 비범위
+## 5. GUI 개요 (`run_gui.py`)
 
-포함 범위
+Tkinter 기반 다이어그램 편집기는 `DiagramCanvas`를 통해 한 화면에서 입력 편집과 결과 확인을 지원한다.
 
-- 3압력 HRSG(HP/IP/LP) 기반 정상상태 열수지
-- Net MW, Net 효율(%LHV), 복수기 부하 등 계약/성능평가에 직접 쓰는 값
-- 벤더 간/조건 간 비교
+- **Hotspot 편집**: 각 블록 주변에 배치된 영역을 클릭하면 Spinbox가 열려 값을 수정할 수 있다. 영문/한글 레이블, 단위, 허용 범위를 동시에 표시한다.
+- **자동 실행(Auto-run)**: 값 변경 후 0.5초 내 자동으로 파이프라인을 다시 실행한다. 해제하면 수동으로 `Run Solver`를 눌러 실행한다.
+- **경고 강조**: HRSG 수렴 실패 또는 closure 초과 시 해당 블록이 노란색으로 강조되고 경고 텍스트가 하단에 표시된다.
+- **내보내기**: GUI에서도 Excel/SVG/Trace JSON을 한 번에 내보낼 수 있다.
 
-비범위 (초기 버전)
-
-- 과도응답(시동/정지, 램프율)
-- 배출가스 환경규제(NOₓ, CO 등)
-- 비용/경제성 해석
-- 장주기 부식/피로/크리프 해석 등 기계적 신뢰성 분석
-- 다중 GT/다중 ST의 복잡한 헤더 공유(후속 단계에서 확장 가능)
+레이아웃 및 더 자세한 설명은 `docs/architecture.md`의 “GUI Diagram Layout” 절을 참고한다.
 
 ---
 
-## 8. 유지보수 원칙
+## 6. Reporter 포맷
 
-- `agent.md` = 동작 규칙서 (HBD Agent behavior contract)
-- `README.md` = 저장소 운영 및 개발 규칙서
-- 설계 변경(예: pinch 기본값 조정, 수렴 기준 변경 등)이 생기면 다음 순서로 업데이트한다:
-  1. `defaults/defaults.json` 수정
-  2. 관련 solver 코드 수정
-  3. `agent.md`와 `README.md`에 해당 변경 반영
-  4. commit hash 기록 후 main에 머지
+- `reporter/excel_reporter.py` – Summary/Streams/Calculations 시트를 가진 XLSX를 생성한다. `openpyxl`이 없으면 내부 XML 빌더로 대체 파일을 만든다.
+- `reporter/diagram_svg.py` – GT → HRSG → ST → Condenser 블록과 주요 수치를 포함한 SVG 다이어그램을 생성한다.
+- `reporter/console_reporter.py` – CLI 실행 시 콘솔 요약과 계산 로그 저장을 담당한다.
 
 ---
 
-## 9. 요약
+## 7. 민감 정보 분리(벤더 커브)
 
-이 저장소는 "입력 JSON만 바꾸면 CCPP HBD가 동일 규칙으로 재현 가능하게 나온다"는 것을 목표로 한다.
+- 공개 저장소에는 벤더 곡선/보증치 등 민감 데이터를 커밋하지 않는다.
+- 런타임에 비공개 데이터를 병합할 때는 환경 변수나 CI 시크릿을 사용한다.
 
-- 3압력 HRSG(HP/IP/LP)까지 포함한 정상상태 열수지
-- 단위/물성/수렴조건 표준화
-- 결과 재현성 확보(케이스 파일명, git commit hash, timestamp)
-- 민감 파라미터(벤더 커브 등)의 안전한 분리
+예시 (GitHub Actions):
 
-이 기준을 지키면, HBD는 개인의 엑셀 감각이 아니라 조직의 표준 자산이 된다.
+```yaml
+- name: Run HBD case with vendor curves
+  run: |
+    mkdir -p private
+    echo "$VENDOR_CURVE_JSON" > private/gt_curves.json
+    poetry run python run_case.py \
+      --case data/plant_case_summer_35C.json \
+      --out output/summer35 \
+      --no-console
+  env:
+    VENDOR_CURVE_JSON: ${{ secrets.VENDOR_CURVE_JSON }}
+```
+
+예시 (로컬 실행):
+
+```bash
+export DATA_SECRET_PATH=$HOME/hbd_secrets
+poetry run python run_case.py --case data/plant_case_summer_35C.json --out output/summer35
+```
+
+`ccpp_hbd_solver.pipeline.load_defaults` 이후에 비밀 데이터를 로드하여 병합하면 코어 솔버는 동일한 인터페이스를 유지하면서 민감정보를 분리할 수 있다.
+
+---
+
+## 8. 개발 노트
+
+- Python 3.11 이상, Poetry 프로젝트 구조 (`pyproject.toml`).
+- 모든 solver는 순수 함수 스타일을 유지하고, 전역 mutable 상태를 사용하지 않는다.
+- `PipelineArtifacts`를 통해 CLI와 GUI가 동일한 계산 결과를 공유하므로, 새로운 리포트나 UI 기능을 추가할 때 재사용 가능하다.
+- 계산 로직 또는 데이터 구조가 변경되면 `README.md`, `agent.md`, `defaults/defaults.json`을 동기화한다.
+
+---
+
+## 9. 참고 자료
+
+- 내부 파이프라인과 GUI 구성도: `docs/architecture.md`
+- 에이전트 동작 규약: `agent.md`
