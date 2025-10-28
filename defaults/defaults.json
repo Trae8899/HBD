@@ -1,0 +1,20 @@
+{
+  "steam_turbine": {
+    "isentropic_eff_hp": 0.88,
+    "isentropic_eff_ip": 0.88,
+    "isentropic_eff_lp": 0.88,
+    "mech_elec_eff": 0.985
+  },
+  "hrsg": {
+    "pinch_K": 10.0,
+    "approach_K": 5.0,
+    "stack_temp_min_C": 90.0
+  },
+  "condenser": {
+    "vacuum_kPa_abs": 8.0,
+    "cw_inlet_C": 20.0
+  },
+  "bop": {
+    "aux_load_MW": 5.0
+  }
+}

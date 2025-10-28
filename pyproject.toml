@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "ccpp-hbd-solver"
+version = "0.1.0"
+description = "Automation toolkit for the CCPP Heat Balance Data solver"
+authors = ["Codex <codex@openai.com>"]
+readme = "README.md"
+packages = [
+  { include = "ccpp_hbd_solver", from = "src" }
+]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
