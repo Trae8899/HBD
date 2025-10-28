@@ -24,7 +24,7 @@ from ..reporter.diagram_svg import export_flow_diagram
 from ..reporter.excel_reporter import export_summary_to_excel
 from .diagram_canvas import DiagramCanvas
 from .events import EventBus
-from .model import CaseModel
+from .model import CaseModel, PathTuple
 from .theme import Theme, get_theme
 
 
@@ -199,6 +199,8 @@ class HBDGuiApp:
         self._subscriptions.append(self.bus.subscribe("result_cleared", self._on_result_cleared))
         self._subscriptions.append(self.bus.subscribe("progress", self._on_progress))
         self._subscriptions.append(self.bus.subscribe("history_changed", self._on_history_changed))
+        self._subscriptions.append(self.bus.subscribe("lock_violation", self._on_lock_violation))
+        self._subscriptions.append(self.bus.subscribe("lock_toggled", self._on_lock_toggled))
 
     # ------------------------------------------------------------------
     # Case management
@@ -251,7 +253,8 @@ class HBDGuiApp:
         if not file_path:
             return
         try:
-            Path(file_path).write_text(json.dumps(self.model.case_data, indent=2), encoding="utf-8")
+            payload = self.model.serialize_case()
+            Path(file_path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except OSError as exc:
             messagebox.showerror("Save Error", f"Failed to save case:\n{exc}", parent=self.root)
             return
@@ -389,17 +392,20 @@ class HBDGuiApp:
     def _populate_case_tree(self, case: Mapping[str, Any]) -> None:
         self.case_tree.delete(*self.case_tree.get_children())
 
-        def add_section(parent: str, key: str, value: Any) -> None:
+        def add_section(parent: str, key: str, value: Any, path: PathTuple) -> None:
             node_id = self.case_tree.insert(parent, "end", text=key, values=("",))
             self.case_tree.item(node_id, open=True)
             if isinstance(value, Mapping):
                 for child_key, child_value in value.items():
-                    add_section(node_id, str(child_key), child_value)
+                    add_section(node_id, str(child_key), child_value, (*path, str(child_key)))
             else:
-                self.case_tree.item(node_id, values=(self._format_number(value, 3),))
+                display = self._format_number(value, 3)
+                if self.model.is_locked(path):
+                    display = f"{display} 🔒"
+                self.case_tree.item(node_id, values=(display,))
 
         for key in ("ambient", "gas_turbine", "hrsg", "steam_turbine", "condenser", "bop"):
-            add_section("", key.replace("_", " ").title(), case.get(key, {}))
+            add_section("", key.replace("_", " ").title(), case.get(key, {}), (key,))
 
     def _populate_summary(self, result: Mapping[str, Any]) -> None:
         self.summary_tree.delete(*self.summary_tree.get_children())
@@ -433,6 +439,15 @@ class HBDGuiApp:
 
     def update_status(self, message: str) -> None:
         self.status_var.set(message)
+
+    def _on_lock_violation(self, path: Sequence[str], **_: Any) -> None:
+        label = " → ".join(path)
+        self.update_status(f"'{label}' is locked. Unlock it to edit.")
+
+    def _on_lock_toggled(self, path: Sequence[str], locked: bool, **_: Any) -> None:
+        label = " → ".join(path)
+        state = "locked" if locked else "unlocked"
+        self.update_status(f"Marked '{label}' as {state}.")
 
     def _on_auto_run_toggled(self) -> None:
         if self.auto_run_var.get():

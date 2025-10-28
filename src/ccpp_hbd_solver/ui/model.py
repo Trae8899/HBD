@@ -33,6 +33,21 @@ def _assign_path(data: MutableMapping[str, Any], path: Sequence[str], value: Any
     current[path[-1]] = value
 
 
+def _parse_locked_paths(ui_state: Mapping[str, Any] | None) -> set[PathTuple]:
+    locked: set[PathTuple] = set()
+    if not ui_state:
+        return locked
+    raw_paths = ui_state.get("locked_paths", [])
+    for entry in raw_paths:
+        if isinstance(entry, Sequence) and not isinstance(entry, (str, bytes)):
+            locked.add(tuple(str(part) for part in entry))
+        elif isinstance(entry, str):
+            parts = [segment.strip() for segment in entry.split(".") if segment.strip()]
+            if parts:
+                locked.add(tuple(parts))
+    return locked
+
+
 def _delete_path(data: MutableMapping[str, Any], path: Sequence[str]) -> None:
     current: MutableMapping[str, Any] = data
     for key in path[:-1]:
@@ -54,23 +69,28 @@ class CaseModel:
     warnings: list[str] = field(default_factory=list)
     progress_step: str | None = None
     progress_value: float = 0.0
+    locked_paths: set[PathTuple] = field(default_factory=set)
 
     def __post_init__(self) -> None:
-        self._undo_stack: Deque[dict[str, Any]] = deque(maxlen=self.max_history)
-        self._redo_stack: Deque[dict[str, Any]] = deque(maxlen=self.max_history)
+        self._undo_stack: Deque[tuple[dict[str, Any], tuple[PathTuple, ...]]] = deque(maxlen=self.max_history)
+        self._redo_stack: Deque[tuple[dict[str, Any], tuple[PathTuple, ...]]] = deque(maxlen=self.max_history)
 
     # ------------------------------------------------------------------
     # Case data lifecycle
     # ------------------------------------------------------------------
     def load_case(self, data: Mapping[str, Any]) -> None:
-        self.case_data = deepcopy(dict(data))
+        raw_case = deepcopy(dict(data))
+        ui_state = raw_case.pop("_ui", {}) if isinstance(raw_case, MutableMapping) else {}
+        self.case_data = raw_case
         self.result = None
         self.warnings = []
         self.progress_step = None
         self.progress_value = 0.0
+        self.locked_paths = _parse_locked_paths(ui_state)
         self._undo_stack.clear()
         self._redo_stack.clear()
         self.bus.publish("case_loaded", case=deepcopy(self.case_data))
+        self._publish_lock_state()
         self.bus.publish("result_cleared")
         self.bus.publish("history_changed", can_undo=False, can_redo=False)
 
@@ -79,6 +99,9 @@ class CaseModel:
 
     def set_value(self, path: Sequence[str], value: Any, *, record_history: bool = True) -> None:
         if not path:
+            return
+        if self.is_locked(path):
+            self.bus.publish("lock_violation", path=tuple(path))
             return
         current = self.get_value(path)
         if current == value:
@@ -92,6 +115,9 @@ class CaseModel:
     def delete_path(self, path: Sequence[str]) -> None:
         if not path:
             return
+        if self.is_locked(path):
+            self.bus.publish("lock_violation", path=tuple(path))
+            return
         if self.get_value(path) is None:
             return
         self._push_history_snapshot()
@@ -99,29 +125,64 @@ class CaseModel:
         self.bus.publish("value_changed", path=tuple(path), value=None, case=deepcopy(self.case_data))
         self.bus.publish("history_changed", can_undo=bool(self._undo_stack), can_redo=bool(self._redo_stack))
 
+    def is_locked(self, path: Sequence[str]) -> bool:
+        target = tuple(path)
+        return any(target == locked or target[: len(locked)] == locked for locked in self.locked_paths)
+
+    def is_explicitly_locked(self, path: Sequence[str]) -> bool:
+        return tuple(path) in self.locked_paths
+
+    def set_locked(self, path: Sequence[str], locked: bool, *, record_history: bool = True) -> None:
+        target = tuple(path)
+        currently_locked = any(target == existing for existing in self.locked_paths)
+        if locked == currently_locked:
+            return
+        if record_history:
+            self._push_history_snapshot()
+        if locked:
+            self.locked_paths.add(target)
+        else:
+            self.locked_paths = {item for item in self.locked_paths if item != target and not item[: len(target)] == target}
+        self._publish_lock_state()
+        self.bus.publish("history_changed", can_undo=bool(self._undo_stack), can_redo=bool(self._redo_stack))
+        self.bus.publish("lock_toggled", path=target, locked=locked)
+
+    def serialize_case(self) -> dict[str, Any]:
+        case_copy = deepcopy(self.case_data)
+        if self.locked_paths:
+            case_copy["_ui"] = {"locked_paths": [list(path) for path in sorted(self.locked_paths)]}
+        return case_copy
+
     # ------------------------------------------------------------------
     # Undo / redo
     # ------------------------------------------------------------------
     def _push_history_snapshot(self) -> None:
-        self._undo_stack.append(deepcopy(self.case_data))
+        snapshot = (deepcopy(self.case_data), tuple(sorted(self.locked_paths)))
+        self._undo_stack.append(snapshot)
         self._redo_stack.clear()
 
     def undo(self) -> None:
         if not self._undo_stack:
             return
-        snapshot = self._undo_stack.pop()
-        self._redo_stack.append(deepcopy(self.case_data))
-        self.case_data = snapshot
+        snapshot_case, snapshot_locked = self._undo_stack.pop()
+        redo_snapshot = (deepcopy(self.case_data), tuple(sorted(self.locked_paths)))
+        self._redo_stack.append(redo_snapshot)
+        self.case_data = snapshot_case
+        self.locked_paths = set(snapshot_locked)
         self.bus.publish("case_loaded", case=deepcopy(self.case_data))
+        self._publish_lock_state()
         self.bus.publish("history_changed", can_undo=bool(self._undo_stack), can_redo=bool(self._redo_stack))
 
     def redo(self) -> None:
         if not self._redo_stack:
             return
-        snapshot = self._redo_stack.pop()
-        self._undo_stack.append(deepcopy(self.case_data))
-        self.case_data = snapshot
+        snapshot_case, snapshot_locked = self._redo_stack.pop()
+        undo_snapshot = (deepcopy(self.case_data), tuple(sorted(self.locked_paths)))
+        self._undo_stack.append(undo_snapshot)
+        self.case_data = snapshot_case
+        self.locked_paths = set(snapshot_locked)
         self.bus.publish("case_loaded", case=deepcopy(self.case_data))
+        self._publish_lock_state()
         self.bus.publish("history_changed", can_undo=bool(self._undo_stack), can_redo=bool(self._redo_stack))
 
     # ------------------------------------------------------------------
@@ -141,6 +202,9 @@ class CaseModel:
         self.progress_step = step
         self.progress_value = value
         self.bus.publish("progress", step=step, value=value)
+
+    def _publish_lock_state(self) -> None:
+        self.bus.publish("locks_changed", locked_paths=tuple(sorted(self.locked_paths)))
 
 
 __all__ = ["CaseModel", "PathTuple"]

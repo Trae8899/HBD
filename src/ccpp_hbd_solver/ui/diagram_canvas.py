@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 from .events import EventBus
 from .model import CaseModel, PathTuple
@@ -112,12 +112,15 @@ class DiagramCanvas(tk.Canvas):
         self._value_items: dict[PathTuple, int] = {}
         self._hotspot_rects: dict[PathTuple, int] = {}
         self._hotspot_labels: dict[PathTuple, int] = {}
+        self._lock_icons: dict[PathTuple, int] = {}
         self._overlay_items: list[int] = []
         self._node_shapes: dict[str, int] = {}
         self._focused_index: int | None = None
         self._scale_factor = 1.0
         self._panning = False
         self._progress_item: int | None = None
+        self._context_menu: tk.Menu | None = None
+        self._locked_paths: set[PathTuple] = set()
 
         self._draw_static_elements()
         self._create_hotspots()
@@ -133,6 +136,7 @@ class DiagramCanvas(tk.Canvas):
         self._subscriptions.append(self.bus.subscribe("result_updated", self._on_result_updated))
         self._subscriptions.append(self.bus.subscribe("result_cleared", self._on_result_cleared))
         self._subscriptions.append(self.bus.subscribe("progress", self._on_progress))
+        self._subscriptions.append(self.bus.subscribe("locks_changed", self._on_locks_changed))
 
         self.bind("<Button-1>", self._on_primary_click)
         self.bind("<Double-Button-1>", self._on_activate_hotspot)
@@ -198,7 +202,11 @@ class DiagramCanvas(tk.Canvas):
             self.tag_bind(rect_id, "<Button-1>", lambda e, s=spec: self._focus_spec(s))
             self.tag_bind(rect_id, "<Double-Button-1>", lambda _e, s=spec: self._open_editor(s))
             self.tag_bind(label_id, "<Button-1>", lambda e, s=spec: self._focus_spec(s))
+            self.tag_bind(label_id, "<Double-Button-1>", lambda _e, s=spec: self._open_editor(s))
             self.tag_bind(value_id, "<Button-1>", lambda e, s=spec: self._focus_spec(s))
+            self.tag_bind(value_id, "<Double-Button-1>", lambda _e, s=spec: self._open_editor(s))
+            for item_id in (rect_id, label_id, value_id):
+                self.tag_bind(item_id, "<Button-3>", lambda event, s=spec: self._open_context_menu(event, s))
 
     # ------------------------------------------------------------------
     # Value updates
@@ -219,6 +227,8 @@ class DiagramCanvas(tk.Canvas):
                 fill = self.theme.palette.warning_outline
         elif value is not None:
             text = str(value)
+        if self.model.is_locked(spec.path):
+            fill = self.theme.palette.text_secondary
         self.itemconfig(self._value_items[spec.path], text=f"{text} {spec.unit}".strip(), fill=fill)
 
     # ------------------------------------------------------------------
@@ -237,8 +247,46 @@ class DiagramCanvas(tk.Canvas):
             return
         self.itemconfig(rect_id, outline=self.theme.palette.hotspot_border)
 
+    def _open_context_menu(self, event: tk.Event, spec: HotspotSpec) -> None:
+        self._focus_spec(spec)
+        if self._context_menu is not None:
+            self._context_menu.destroy()
+            self._context_menu = None
+        menu = tk.Menu(self, tearoff=False)
+        locked = self.model.is_locked(spec.path)
+        explicit_lock = self.model.is_explicitly_locked(spec.path)
+        owner: PathTuple | None = None
+        if locked and not explicit_lock:
+            current = spec.path[:-1]
+            while current:
+                if self.model.is_explicitly_locked(current):
+                    owner = current
+                    break
+                current = current[:-1]
+        if locked:
+            if explicit_lock:
+                menu.add_command(label="Unlock value", command=lambda: self.model.set_locked(spec.path, False))
+            elif owner is not None:
+                owner_label = " → ".join(owner)
+                menu.add_command(label=f"Unlock {owner_label}", command=lambda o=owner: self.model.set_locked(o, False))
+            else:
+                menu.add_command(label="Unlock value", state="disabled")
+        else:
+            menu.add_command(label="Lock value", command=lambda: self.model.set_locked(spec.path, True))
+        menu.add_separator()
+        menu.add_command(label="Edit…", state="disabled" if locked else "normal", command=lambda: self._open_editor(spec))
+        self._context_menu = menu
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
     def _open_editor(self, spec: HotspotSpec) -> None:
         self._focus_spec(spec)
+        if self.model.is_locked(spec.path):
+            messagebox.showinfo("Locked value", "Unlock this value to edit it.", parent=self.winfo_toplevel())
+            self.bus.publish("lock_violation", path=spec.path)
+            return
         if self._editor is not None:
             self._destroy_editor()
         current = self.model.get_value(spec.path)
@@ -524,6 +572,28 @@ class DiagramCanvas(tk.Canvas):
             fill=self.theme.palette.text_secondary,
         )
 
+    def _on_locks_changed(self, locked_paths: Iterable[PathTuple], **_: Any) -> None:
+        self._locked_paths = {tuple(path) for path in locked_paths}
+        self._update_lock_icons()
+        self._refresh_all_values()
+
+    def _update_lock_icons(self) -> None:
+        palette = self.theme.palette
+        font = self.theme.fonts.overlay
+        for spec in HOTSPOTS:
+            icon_id = self._lock_icons.get(spec.path)
+            if spec.path in self._locked_paths:
+                if icon_id is None:
+                    x = spec.rect[2] - 14
+                    y = spec.rect[1] + 14
+                    icon_id = self.create_text(x, y, text="🔒", font=font, fill=palette.text_secondary)
+                    self._lock_icons[spec.path] = icon_id
+                else:
+                    self.itemconfig(icon_id, fill=palette.text_secondary, font=font)
+            elif icon_id is not None:
+                self.delete(icon_id)
+                self._lock_icons.pop(spec.path, None)
+
     # ------------------------------------------------------------------
     # Theme updates
     # ------------------------------------------------------------------
@@ -547,6 +617,7 @@ class DiagramCanvas(tk.Canvas):
             self.itemconfig(self._hotspot_labels[spec.path], fill=theme.palette.text_primary, font=theme.fonts.label)
             self.itemconfig(self._value_items[spec.path], fill=theme.palette.value_text, font=theme.fonts.value)
         self._refresh_all_values()
+        self._update_lock_icons()
 
     # ------------------------------------------------------------------
     # Cleanup
