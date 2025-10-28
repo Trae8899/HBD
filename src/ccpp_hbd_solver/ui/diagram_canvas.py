@@ -1,718 +1,310 @@
-"""Interactive diagram canvas with inline editing hotspots."""
+"""Interactive diagram canvas that reacts to model events."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterable
 
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import ttk
 
-from .theme import COLORS, FONTS
-
-PathTuple = Sequence[str]
-ValueGetter = Callable[[PathTuple], Any]
-ValueSetter = Callable[[PathTuple, float], None]
-ChangeCallback = Callable[[PathTuple, float], None]
+from .events import EventBus
+from .model import CaseModel, PathTuple
+from .theme import Theme
 
 
 @dataclass(frozen=True)
 class HotspotSpec:
-    """Definition for a clickable hotspot on the diagram."""
-
-    path: tuple[str, ...]
-    label_en: str
-    label_ko: str
+    path: PathTuple
+    label: str
     unit: str
-    bbox: tuple[int, int, int, int]
+    rect: tuple[int, int, int, int]
     value_pos: tuple[int, int]
     min_value: float
     max_value: float
-    step: float = 1.0
-    decimals: int = 1
+    step: float
+    decimals: int
 
 
 HOTSPOTS: tuple[HotspotSpec, ...] = (
-    HotspotSpec(
-        path=("ambient", "Ta_C"),
-        label_en="Ambient T",
-        label_ko="건구 온도",
-        unit="°C",
-        bbox=(20, 20, 200, 80),
-        value_pos=(28, 58),
-        min_value=-20.0,
-        max_value=55.0,
-        step=0.5,
-        decimals=1,
-    ),
-    HotspotSpec(
-        path=("ambient", "RH_pct"),
-        label_en="Relative Humidity",
-        label_ko="상대습도",
-        unit="%",
-        bbox=(220, 20, 400, 80),
-        value_pos=(228, 58),
-        min_value=0.0,
-        max_value=100.0,
-        step=1.0,
-        decimals=0,
-    ),
-    HotspotSpec(
-        path=("ambient", "P_bar"),
-        label_en="Ambient Pressure",
-        label_ko="대기압",
-        unit="bar abs",
-        bbox=(420, 20, 600, 80),
-        value_pos=(428, 58),
-        min_value=0.8,
-        max_value=1.1,
-        step=0.01,
-        decimals=3,
-    ),
-    HotspotSpec(
-        path=("gas_turbine", "ISO_power_MW"),
-        label_en="GT ISO Power",
-        label_ko="ISO 정격",
-        unit="MW",
-        bbox=(20, 120, 180, 180),
-        value_pos=(28, 158),
-        min_value=50.0,
-        max_value=600.0,
-        step=1.0,
-        decimals=0,
-    ),
-    HotspotSpec(
-        path=("gas_turbine", "ISO_heat_rate_kJ_per_kWh"),
-        label_en="ISO Heat Rate",
-        label_ko="ISO 열소비율",
-        unit="kJ/kWh",
-        bbox=(20, 190, 180, 250),
-        value_pos=(28, 228),
-        min_value=8000.0,
-        max_value=12000.0,
-        step=10.0,
-        decimals=0,
-    ),
-    HotspotSpec(
-        path=("gas_turbine", "fuel_LHV_kJ_per_kg"),
-        label_en="Fuel LHV",
-        label_ko="연료 LHV",
-        unit="kJ/kg",
-        bbox=(20, 260, 180, 320),
-        value_pos=(28, 298),
-        min_value=38000.0,
-        max_value=52000.0,
-        step=50.0,
-        decimals=0,
-    ),
-    HotspotSpec(
-        path=("gas_turbine", "ISO_exhaust_temp_C"),
-        label_en="ISO Exhaust T",
-        label_ko="ISO 배기온도",
-        unit="°C",
-        bbox=(20, 330, 180, 390),
-        value_pos=(28, 368),
-        min_value=450.0,
-        max_value=700.0,
-        step=1.0,
-        decimals=0,
-    ),
-    HotspotSpec(
-        path=("gas_turbine", "ISO_exhaust_flow_kg_s"),
-        label_en="ISO Exhaust Flow",
-        label_ko="ISO 배기유량",
-        unit="kg/s",
-        bbox=(200, 120, 360, 180),
-        value_pos=(208, 158),
-        min_value=200.0,
-        max_value=900.0,
-        step=5.0,
-        decimals=0,
-    ),
-    HotspotSpec(
-        path=("gas_turbine", "corr_coeff", "dPower_pct_per_K"),
-        label_en="ΔPower",
-        label_ko="전력 변화율",
-        unit="%/K",
-        bbox=(200, 190, 360, 250),
-        value_pos=(208, 228),
-        min_value=-1.0,
-        max_value=0.0,
-        step=0.01,
-        decimals=2,
-    ),
-    HotspotSpec(
-        path=("gas_turbine", "corr_coeff", "dFlow_pct_per_K"),
-        label_en="ΔFlow",
-        label_ko="유량 변화율",
-        unit="%/K",
-        bbox=(200, 260, 360, 320),
-        value_pos=(208, 298),
-        min_value=0.0,
-        max_value=1.0,
-        step=0.01,
-        decimals=2,
-    ),
-    HotspotSpec(
-        path=("gas_turbine", "corr_coeff", "dExhT_K_per_K"),
-        label_en="ΔExhaust T",
-        label_ko="배기온 변화",
-        unit="K/K",
-        bbox=(200, 330, 360, 390),
-        value_pos=(208, 368),
-        min_value=0.0,
-        max_value=2.0,
-        step=0.05,
-        decimals=2,
-    ),
-    HotspotSpec(
-        path=("hrsg", "hp", "pressure_bar"),
-        label_en="HP Pressure",
-        label_ko="HP 압력",
-        unit="bar abs",
-        bbox=(380, 120, 540, 170),
-        value_pos=(388, 152),
-        min_value=60.0,
-        max_value=160.0,
-        step=1.0,
-        decimals=0,
-    ),
-    HotspotSpec(
-        path=("hrsg", "hp", "steam_temp_C"),
-        label_en="HP Steam T",
-        label_ko="HP 증기온",
-        unit="°C",
-        bbox=(380, 176, 540, 226),
-        value_pos=(388, 208),
-        min_value=450.0,
-        max_value=600.0,
-        step=1.0,
-        decimals=0,
-    ),
-    HotspotSpec(
-        path=("hrsg", "hp", "pinch_K"),
-        label_en="HP Pinch",
-        label_ko="HP 핀치",
-        unit="K",
-        bbox=(380, 232, 540, 282),
-        value_pos=(388, 264),
-        min_value=5.0,
-        max_value=20.0,
-        step=0.5,
-        decimals=1,
-    ),
-    HotspotSpec(
-        path=("hrsg", "hp", "approach_K"),
-        label_en="HP Approach",
-        label_ko="HP 어프로치",
-        unit="K",
-        bbox=(380, 288, 540, 338),
-        value_pos=(388, 320),
-        min_value=3.0,
-        max_value=15.0,
-        step=0.5,
-        decimals=1,
-    ),
-    HotspotSpec(
-        path=("hrsg", "ip", "pressure_bar"),
-        label_en="IP Pressure",
-        label_ko="IP 압력",
-        unit="bar abs",
-        bbox=(560, 120, 720, 170),
-        value_pos=(568, 152),
-        min_value=15.0,
-        max_value=60.0,
-        step=1.0,
-        decimals=0,
-    ),
-    HotspotSpec(
-        path=("hrsg", "ip", "steam_temp_C"),
-        label_en="IP Steam T",
-        label_ko="IP 증기온",
-        unit="°C",
-        bbox=(560, 176, 720, 226),
-        value_pos=(568, 208),
-        min_value=400.0,
-        max_value=600.0,
-        step=1.0,
-        decimals=0,
-    ),
-    HotspotSpec(
-        path=("hrsg", "ip", "pinch_K"),
-        label_en="IP Pinch",
-        label_ko="IP 핀치",
-        unit="K",
-        bbox=(560, 232, 720, 282),
-        value_pos=(568, 264),
-        min_value=8.0,
-        max_value=20.0,
-        step=0.5,
-        decimals=1,
-    ),
-    HotspotSpec(
-        path=("hrsg", "ip", "approach_K"),
-        label_en="IP Approach",
-        label_ko="IP 어프로치",
-        unit="K",
-        bbox=(560, 288, 720, 338),
-        value_pos=(568, 320),
-        min_value=4.0,
-        max_value=15.0,
-        step=0.5,
-        decimals=1,
-    ),
-    HotspotSpec(
-        path=("hrsg", "lp", "pressure_bar"),
-        label_en="LP Pressure",
-        label_ko="LP 압력",
-        unit="bar abs",
-        bbox=(740, 120, 900, 170),
-        value_pos=(748, 152),
-        min_value=1.0,
-        max_value=15.0,
-        step=0.5,
-        decimals=1,
-    ),
-    HotspotSpec(
-        path=("hrsg", "lp", "steam_temp_C"),
-        label_en="LP Steam T",
-        label_ko="LP 증기온",
-        unit="°C",
-        bbox=(740, 176, 900, 226),
-        value_pos=(748, 208),
-        min_value=150.0,
-        max_value=350.0,
-        step=1.0,
-        decimals=0,
-    ),
-    HotspotSpec(
-        path=("hrsg", "lp", "pinch_K"),
-        label_en="LP Pinch",
-        label_ko="LP 핀치",
-        unit="K",
-        bbox=(740, 232, 900, 282),
-        value_pos=(748, 264),
-        min_value=10.0,
-        max_value=25.0,
-        step=0.5,
-        decimals=1,
-    ),
-    HotspotSpec(
-        path=("hrsg", "lp", "approach_K"),
-        label_en="LP Approach",
-        label_ko="LP 어프로치",
-        unit="K",
-        bbox=(740, 288, 900, 338),
-        value_pos=(748, 320),
-        min_value=5.0,
-        max_value=15.0,
-        step=0.5,
-        decimals=1,
-    ),
-    HotspotSpec(
-        path=("hrsg", "stack_temp_min_C"),
-        label_en="Stack Min T",
-        label_ko="스택 최소온",
-        unit="°C",
-        bbox=(920, 200, 1080, 260),
-        value_pos=(928, 238),
-        min_value=70.0,
-        max_value=130.0,
-        step=1.0,
-        decimals=0,
-    ),
-    HotspotSpec(
-        path=("steam_turbine", "isentropic_eff_hp"),
-        label_en="HP η",
-        label_ko="HP 효율",
-        unit="η",
-        bbox=(380, 360, 480, 410),
-        value_pos=(388, 392),
-        min_value=0.75,
-        max_value=0.92,
-        step=0.005,
-        decimals=3,
-    ),
-    HotspotSpec(
-        path=("steam_turbine", "isentropic_eff_ip"),
-        label_en="IP η",
-        label_ko="IP 효율",
-        unit="η",
-        bbox=(490, 360, 590, 410),
-        value_pos=(498, 392),
-        min_value=0.75,
-        max_value=0.92,
-        step=0.005,
-        decimals=3,
-    ),
-    HotspotSpec(
-        path=("steam_turbine", "isentropic_eff_lp"),
-        label_en="LP η",
-        label_ko="LP 효율",
-        unit="η",
-        bbox=(600, 360, 700, 410),
-        value_pos=(608, 392),
-        min_value=0.75,
-        max_value=0.90,
-        step=0.005,
-        decimals=3,
-    ),
-    HotspotSpec(
-        path=("steam_turbine", "mech_elec_eff"),
-        label_en="Mech/Gen η",
-        label_ko="기전 효율",
-        unit="η",
-        bbox=(710, 360, 840, 410),
-        value_pos=(718, 392),
-        min_value=0.95,
-        max_value=0.995,
-        step=0.001,
-        decimals=3,
-    ),
-    HotspotSpec(
-        path=("condenser", "vacuum_kPa_abs"),
-        label_en="Condenser Vacuum",
-        label_ko="복수기 진공",
-        unit="kPa abs",
-        bbox=(900, 320, 1080, 370),
-        value_pos=(908, 352),
-        min_value=4.0,
-        max_value=15.0,
-        step=0.1,
-        decimals=2,
-    ),
-    HotspotSpec(
-        path=("condenser", "cw_inlet_C"),
-        label_en="CW Inlet",
-        label_ko="냉각수 입구",
-        unit="°C",
-        bbox=(900, 372, 1080, 422),
-        value_pos=(908, 404),
-        min_value=5.0,
-        max_value=35.0,
-        step=0.5,
-        decimals=1,
-    ),
-    HotspotSpec(
-        path=("bop", "aux_load_MW"),
-        label_en="Aux Load",
-        label_ko="보조부하",
-        unit="MW",
-        bbox=(900, 120, 1080, 170),
-        value_pos=(908, 152),
-        min_value=0.0,
-        max_value=50.0,
-        step=0.5,
-        decimals=1,
-    ),
+    HotspotSpec(("ambient", "Ta_C"), "Ambient T", "°C", (20, 20, 200, 80), (28, 56), -20.0, 55.0, 0.5, 1),
+    HotspotSpec(("ambient", "RH_pct"), "Relative Humidity", "%", (220, 20, 400, 80), (228, 56), 0.0, 100.0, 1.0, 0),
+    HotspotSpec(("ambient", "P_bar"), "Ambient Pressure", "bar abs", (420, 20, 600, 80), (428, 56), 0.8, 1.1, 0.01, 3),
+    HotspotSpec(("gas_turbine", "ISO_power_MW"), "GT ISO Power", "MW", (20, 120, 180, 180), (28, 156), 50.0, 600.0, 1.0, 0),
+    HotspotSpec(("gas_turbine", "ISO_heat_rate_kJ_per_kWh"), "ISO Heat Rate", "kJ/kWh", (20, 190, 180, 250), (28, 226), 8000.0, 12000.0, 10.0, 0),
+    HotspotSpec(("gas_turbine", "fuel_LHV_kJ_per_kg"), "Fuel LHV", "kJ/kg", (20, 260, 180, 320), (28, 296), 38000.0, 52000.0, 25.0, 0),
+    HotspotSpec(("gas_turbine", "ISO_exhaust_temp_C"), "ISO Exhaust T", "°C", (20, 330, 180, 390), (28, 366), 450.0, 700.0, 1.0, 0),
+    HotspotSpec(("gas_turbine", "ISO_exhaust_flow_kg_s"), "ISO Exhaust Flow", "kg/s", (200, 120, 360, 180), (208, 156), 200.0, 900.0, 5.0, 0),
+    HotspotSpec(("gas_turbine", "corr_coeff", "dPower_pct_per_K"), "ΔPower", "%/K", (200, 190, 360, 250), (208, 226), -1.0, 0.0, 0.01, 2),
+    HotspotSpec(("gas_turbine", "corr_coeff", "dFlow_pct_per_K"), "ΔFlow", "%/K", (200, 260, 360, 320), (208, 296), 0.0, 1.0, 0.01, 2),
+    HotspotSpec(("gas_turbine", "corr_coeff", "dExhT_K_per_K"), "ΔExhaust T", "K/K", (200, 330, 360, 390), (208, 366), 0.0, 2.0, 0.05, 2),
+    HotspotSpec(("hrsg", "hp", "pressure_bar"), "HP Pressure", "bar abs", (380, 120, 540, 170), (388, 152), 60.0, 160.0, 1.0, 0),
+    HotspotSpec(("hrsg", "hp", "steam_temp_C"), "HP Steam T", "°C", (380, 176, 540, 226), (388, 208), 450.0, 600.0, 1.0, 0),
+    HotspotSpec(("hrsg", "hp", "pinch_K"), "HP Pinch", "K", (380, 232, 540, 282), (388, 264), 5.0, 20.0, 0.5, 1),
+    HotspotSpec(("hrsg", "hp", "approach_K"), "HP Approach", "K", (380, 288, 540, 338), (388, 320), 3.0, 15.0, 0.5, 1),
+    HotspotSpec(("hrsg", "ip", "pressure_bar"), "IP Pressure", "bar abs", (560, 120, 720, 170), (568, 152), 15.0, 60.0, 1.0, 0),
+    HotspotSpec(("hrsg", "ip", "steam_temp_C"), "IP Steam T", "°C", (560, 176, 720, 226), (568, 208), 400.0, 600.0, 1.0, 0),
+    HotspotSpec(("hrsg", "ip", "pinch_K"), "IP Pinch", "K", (560, 232, 720, 282), (568, 264), 8.0, 20.0, 0.5, 1),
+    HotspotSpec(("hrsg", "ip", "approach_K"), "IP Approach", "K", (560, 288, 720, 338), (568, 320), 4.0, 15.0, 0.5, 1),
+    HotspotSpec(("hrsg", "lp", "pressure_bar"), "LP Pressure", "bar abs", (740, 120, 900, 170), (748, 152), 1.0, 15.0, 0.5, 1),
+    HotspotSpec(("hrsg", "lp", "steam_temp_C"), "LP Steam T", "°C", (740, 176, 900, 226), (748, 208), 150.0, 350.0, 1.0, 0),
+    HotspotSpec(("hrsg", "lp", "pinch_K"), "LP Pinch", "K", (740, 232, 900, 282), (748, 264), 10.0, 25.0, 0.5, 1),
+    HotspotSpec(("hrsg", "lp", "approach_K"), "LP Approach", "K", (740, 288, 900, 338), (748, 320), 5.0, 15.0, 0.5, 1),
+    HotspotSpec(("hrsg", "stack_temp_min_C"), "Stack Min T", "°C", (920, 200, 1080, 260), (928, 236), 70.0, 130.0, 1.0, 0),
+    HotspotSpec(("steam_turbine", "isentropic_eff_hp"), "HP η", "η", (380, 360, 480, 410), (388, 392), 0.75, 0.92, 0.005, 3),
+    HotspotSpec(("steam_turbine", "isentropic_eff_ip"), "IP η", "η", (490, 360, 590, 410), (498, 392), 0.75, 0.92, 0.005, 3),
+    HotspotSpec(("steam_turbine", "isentropic_eff_lp"), "LP η", "η", (600, 360, 700, 410), (608, 392), 0.75, 0.90, 0.005, 3),
+    HotspotSpec(("steam_turbine", "mech_elec_eff"), "Mech/Gen η", "η", (710, 360, 840, 410), (718, 392), 0.95, 0.995, 0.001, 3),
+    HotspotSpec(("condenser", "vacuum_kPa_abs"), "Condenser Vacuum", "kPa abs", (900, 320, 1080, 370), (908, 352), 4.0, 15.0, 0.1, 2),
+    HotspotSpec(("condenser", "cw_inlet_C"), "CW Inlet", "°C", (900, 372, 1080, 422), (908, 404), 5.0, 35.0, 0.5, 1),
+    HotspotSpec(("bop", "aux_load_MW"), "Aux Load", "MW", (900, 120, 1080, 170), (908, 152), 0.0, 50.0, 0.5, 1),
 )
 
 
-class DiagramCanvas(tk.Canvas):
-    """Canvas widget that renders the plant schematic and supports inline editing."""
+WARNING_KEYWORDS: tuple[tuple[str, str], ...] = (
+    ("HRSG", "hrsg"),
+    ("PINCH", "hrsg"),
+    ("STACK", "hrsg"),
+    ("ATTEMP", "hrsg"),
+    ("GT", "gt"),
+    ("TURBINE", "st"),
+    ("STEAM", "st"),
+    ("COND", "condenser"),
+    ("CLOSURE", "condenser"),
+)
 
-    def __init__(
-        self,
-        master: tk.Widget,
-        *,
-        get_value: ValueGetter,
-        set_value: ValueSetter,
-        on_change: ChangeCallback,
-        width: int = 1100,
-        height: int = 460,
-    ) -> None:
+
+def _severity_from_warning(message: str) -> str:
+    upper = message.upper()
+    if upper.startswith("E-") or "VIOLATION" in upper or "NONCONVERGED" in upper or "CLOSURE" in upper:
+        return "critical"
+    if "LIMIT" in upper:
+        return "critical"
+    return "warning"
+
+
+def _node_from_warning(message: str) -> str | None:
+    upper = message.upper()
+    for keyword, node in WARNING_KEYWORDS:
+        if keyword in upper:
+            return node
+    return None
+
+
+class DiagramCanvas(tk.Canvas):
+    """Canvas widget responsible only for rendering and interaction."""
+
+    def __init__(self, master: tk.Widget, *, model: CaseModel, bus: EventBus, theme: Theme) -> None:
         super().__init__(
             master,
-            width=width,
-            height=height,
-            background=COLORS["canvas_bg"],
+            width=theme.metrics.canvas_width,
+            height=theme.metrics.canvas_height,
+            background=theme.palette.canvas_bg,
             highlightthickness=0,
         )
-        self._get_value = get_value
-        self._set_value = set_value
-        self._on_change = on_change
-        self._hotspot_items: dict[HotspotSpec, dict[str, int]] = {}
-        self._value_labels: dict[HotspotSpec, int] = {}
+        self.model = model
+        self.bus = bus
+        self.theme = theme
+
         self._editor: ttk.Spinbox | None = None
+        self._editor_window_id: int | None = None
+        self._subscriptions: list[Callable[[], None]] = []
+        self._value_items: dict[PathTuple, int] = {}
+        self._hotspot_rects: dict[PathTuple, int] = {}
+        self._hotspot_labels: dict[PathTuple, int] = {}
         self._overlay_items: list[int] = []
         self._node_shapes: dict[str, int] = {}
-        self._default_fills: dict[str, str] = {}
+        self._focused_index: int | None = None
+        self._scale_factor = 1.0
+        self._panning = False
+        self._progress_item: int | None = None
 
         self._draw_static_elements()
         self._create_hotspots()
-        self.update_case_values()
+        self._register_events()
+        self._refresh_all_values()
 
     # ------------------------------------------------------------------
-    # Rendering helpers
+    # Event bus bindings
+    # ------------------------------------------------------------------
+    def _register_events(self) -> None:
+        self._subscriptions.append(self.bus.subscribe("case_loaded", self._on_case_loaded))
+        self._subscriptions.append(self.bus.subscribe("value_changed", self._on_value_changed))
+        self._subscriptions.append(self.bus.subscribe("result_updated", self._on_result_updated))
+        self._subscriptions.append(self.bus.subscribe("result_cleared", self._on_result_cleared))
+        self._subscriptions.append(self.bus.subscribe("progress", self._on_progress))
+
+        self.bind("<Button-1>", self._on_primary_click)
+        self.bind("<Double-Button-1>", self._on_activate_hotspot)
+        self.bind("<KeyPress-Tab>", self._on_focus_next)
+        self.bind("<Shift-Tab>", self._on_focus_prev)
+        self.bind("<KeyPress-Return>", self._on_focus_activate)
+        self.bind("<KeyPress-space>", self._on_space_press)
+        self.bind("<KeyRelease-space>", self._on_space_release)
+        self.bind("<ButtonPress-1>", self._on_button_press, add=True)
+        self.bind("<B1-Motion>", self._on_mouse_drag)
+        self.bind("<ButtonRelease-1>", self._on_button_release)
+        self.bind("<Control-MouseWheel>", self._on_zoom)
+        self.bind("<Control-Button-4>", self._on_zoom_button)
+        self.bind("<Control-Button-5>", self._on_zoom_button)
+
+    # ------------------------------------------------------------------
+    # Drawing helpers
     # ------------------------------------------------------------------
     def _draw_static_elements(self) -> None:
-        """Draw fixed diagram blocks and connecting lines."""
+        palette = self.theme.palette
+        metrics = self.theme.metrics
+        outline = palette.block_outline
 
-        # Process flow arrows
-        self.create_line(140, 170, 200, 170, arrow=tk.LAST, fill=COLORS["block_outline"], width=3)
-        self.create_line(300, 170, 360, 170, arrow=tk.LAST, fill=COLORS["block_outline"], width=3)
-        self.create_line(460, 170, 520, 170, arrow=tk.LAST, fill=COLORS["block_outline"], width=3)
-        self.create_line(520, 260, 680, 300, arrow=tk.LAST, fill=COLORS["block_outline"], width=3)
+        self._node_shapes["gt"] = self.create_rectangle(80, 130, 200, 210, fill=palette.gt_fill, outline=outline, width=metrics.block_outline_width)
+        self._node_shapes["hrsg"] = self.create_rectangle(220, 90, 320, 310, fill=palette.hrsg_fill, outline=outline, width=metrics.block_outline_width)
+        self._node_shapes["st_hp"] = self.create_rectangle(360, 110, 460, 160, fill=palette.st_fill, outline=outline, width=metrics.block_outline_width)
+        self._node_shapes["st_ip"] = self.create_rectangle(360, 180, 460, 230, fill=palette.st_fill, outline=outline, width=metrics.block_outline_width)
+        self._node_shapes["st_lp"] = self.create_rectangle(360, 250, 460, 300, fill=palette.st_fill, outline=outline, width=metrics.block_outline_width)
+        self._node_shapes["condenser"] = self.create_rectangle(520, 280, 680, 360, fill=palette.cond_fill, outline=outline, width=metrics.block_outline_width)
 
-        # Major equipment blocks
-        self._node_shapes["gt"] = self.create_rectangle(
-            80,
-            130,
-            200,
-            210,
-            fill=COLORS["gt_fill"],
-            outline=COLORS["block_outline"],
-            width=2,
-        )
-        self._node_shapes["hrsg"] = self.create_rectangle(
-            220,
-            90,
-            320,
-            310,
-            fill=COLORS["hrsg_fill"],
-            outline=COLORS["block_outline"],
-            width=2,
-        )
-        self._node_shapes["st_hp"] = self.create_rectangle(
-            360,
-            110,
-            460,
-            160,
-            fill=COLORS["st_fill"],
-            outline=COLORS["block_outline"],
-            width=2,
-        )
-        self._node_shapes["st_ip"] = self.create_rectangle(
-            360,
-            180,
-            460,
-            230,
-            fill=COLORS["st_fill"],
-            outline=COLORS["block_outline"],
-            width=2,
-        )
-        self._node_shapes["st_lp"] = self.create_rectangle(
-            360,
-            250,
-            460,
-            300,
-            fill=COLORS["st_fill"],
-            outline=COLORS["block_outline"],
-            width=2,
-        )
-        self._node_shapes["condenser"] = self.create_rectangle(
-            520,
-            280,
-            680,
-            360,
-            fill=COLORS["cond_fill"],
-            outline=COLORS["block_outline"],
-            width=2,
-        )
+        # Arrows and connectors
+        stream_width = metrics.stream_width
+        self.create_line(140, 170, 220, 170, arrow=tk.LAST, fill=outline, width=stream_width)
+        self.create_line(320, 170, 360, 170, arrow=tk.LAST, fill=outline, width=stream_width)
+        self.create_line(460, 170, 520, 170, arrow=tk.LAST, fill=outline, width=stream_width)
+        self.create_line(520, 260, 680, 300, arrow=tk.LAST, fill=outline, width=stream_width)
 
-        self._default_fills = {
-            "gt": COLORS["gt_fill"],
-            "hrsg": COLORS["hrsg_fill"],
-            "st_hp": COLORS["st_fill"],
-            "st_ip": COLORS["st_fill"],
-            "st_lp": COLORS["st_fill"],
-            "condenser": COLORS["cond_fill"],
-        }
-
-        # Labels for blocks
-        self.create_text(
-            140,
-            120,
-            text="Gas Turbine\n가스터빈",
-            font=FONTS["section"],
-            fill=COLORS["text_primary"],
-            anchor="s",
-            justify="center",
-        )
-        self.create_text(
-            270,
-            80,
-            text="HRSG",
-            font=FONTS["section"],
-            fill=COLORS["text_primary"],
-            anchor="s",
-        )
-        self.create_text(
-            410,
-            100,
-            text="HP",
-            font=FONTS["label"],
-            fill=COLORS["text_secondary"],
-            anchor="s",
-        )
-        self.create_text(
-            410,
-            170,
-            text="IP",
-            font=FONTS["label"],
-            fill=COLORS["text_secondary"],
-            anchor="s",
-        )
-        self.create_text(
-            410,
-            240,
-            text="LP",
-            font=FONTS["label"],
-            fill=COLORS["text_secondary"],
-            anchor="s",
-        )
-        self.create_text(
-            600,
-            270,
-            text="Condenser\n복수기",
-            font=FONTS["section"],
-            fill=COLORS["text_primary"],
-            anchor="s",
-            justify="center",
-        )
+        font_label = self.theme.fonts.label
+        self.create_text(140, 115, text="Gas Turbine", font=font_label, fill=palette.text_primary)
+        self.create_text(270, 80, text="HRSG", font=font_label, fill=palette.text_primary)
+        self.create_text(410, 100, text="Steam Turbine", font=font_label, fill=palette.text_primary)
+        self.create_text(600, 270, text="Condenser", font=font_label, fill=palette.text_primary)
 
     def _create_hotspots(self) -> None:
-        """Create interactive hotspots according to the specification."""
-
+        palette = self.theme.palette
+        metrics = self.theme.metrics
         for spec in HOTSPOTS:
-            rect = self.create_rectangle(
-                *spec.bbox,
-                fill=COLORS["hotspot_bg"],
-                outline=COLORS["hotspot_border"],
-                width=1,
+            rect_id = self.create_rectangle(
+                *spec.rect,
+                outline=palette.hotspot_border,
+                width=metrics.hotspot_border_width,
+                fill=palette.hotspot_bg,
             )
-            label_text = f"{spec.label_en}\n{spec.label_ko}"
-            self.create_text(
-                spec.bbox[0] + 6,
-                spec.bbox[1] + 6,
-                text=label_text,
-                font=FONTS["label"],
-                fill=COLORS["text_secondary"],
-                anchor="nw",
-                justify="left",
-            )
-            value_id = self.create_text(
-                spec.value_pos[0],
-                spec.value_pos[1],
-                text="",
-                font=FONTS["value"],
-                fill=COLORS["value_text"],
-                anchor="nw",
-            )
-            self.tag_bind(rect, "<Button-1>", lambda event, s=spec: self._open_editor(s))
-            self.tag_bind(value_id, "<Button-1>", lambda event, s=spec: self._open_editor(s))
-            self.tag_bind(rect, "<Button-3>", lambda event, s=spec: self._show_hotspot_help(s))
-            self.tag_bind(value_id, "<Button-3>", lambda event, s=spec: self._show_hotspot_help(s))
-            self._hotspot_items[spec] = {"rect": rect, "value": value_id}
-            self._value_labels[spec] = value_id
+            label_id = self.create_text(spec.rect[0] + 4, spec.rect[1] + 12, text=spec.label, anchor="w", font=self.theme.fonts.label, fill=palette.text_primary)
+            value_id = self.create_text(spec.value_pos[0], spec.value_pos[1], anchor="w", font=self.theme.fonts.value, fill=palette.value_text)
+
+            self._hotspot_rects[spec.path] = rect_id
+            self._hotspot_labels[spec.path] = label_id
+            self._value_items[spec.path] = value_id
+
+            self.tag_bind(rect_id, "<Enter>", lambda _e, r=rect_id: self.itemconfig(r, outline=palette.block_outline))
+            self.tag_bind(rect_id, "<Leave>", lambda _e, r=rect_id: self._reset_hotspot_outline(r))
+            self.tag_bind(rect_id, "<Button-1>", lambda e, s=spec: self._focus_spec(s))
+            self.tag_bind(rect_id, "<Double-Button-1>", lambda _e, s=spec: self._open_editor(s))
+            self.tag_bind(label_id, "<Button-1>", lambda e, s=spec: self._focus_spec(s))
+            self.tag_bind(value_id, "<Button-1>", lambda e, s=spec: self._focus_spec(s))
 
     # ------------------------------------------------------------------
-    # User interaction
+    # Value updates
     # ------------------------------------------------------------------
+    def _refresh_all_values(self) -> None:
+        for spec in HOTSPOTS:
+            self._update_value_text(spec)
+
+    def _update_value_text(self, spec: HotspotSpec) -> None:
+        value = self.model.get_value(spec.path)
+        text = "—"
+        fill = self.theme.palette.value_text
+        if isinstance(value, (int, float)):
+            text = f"{float(value):.{spec.decimals}f}" if spec.decimals else f"{int(round(float(value)))}"
+            if spec.decimals:
+                text = text.rstrip("0").rstrip(".")
+            if float(value) < spec.min_value or float(value) > spec.max_value:
+                fill = self.theme.palette.warning_outline
+        elif value is not None:
+            text = str(value)
+        self.itemconfig(self._value_items[spec.path], text=f"{text} {spec.unit}".strip(), fill=fill)
+
+    # ------------------------------------------------------------------
+    # Interaction helpers
+    # ------------------------------------------------------------------
+    def _focus_spec(self, spec: HotspotSpec) -> None:
+        self.focus_set()
+        if self._focused_index is not None:
+            prev_spec = HOTSPOTS[self._focused_index]
+            self._reset_hotspot_outline(self._hotspot_rects[prev_spec.path])
+        self._focused_index = HOTSPOTS.index(spec)
+        self.itemconfig(self._hotspot_rects[spec.path], outline=self.theme.palette.value_text)
+
+    def _reset_hotspot_outline(self, rect_id: int) -> None:
+        if self._focused_index is not None and self._hotspot_rects.get(HOTSPOTS[self._focused_index].path) == rect_id:
+            return
+        self.itemconfig(rect_id, outline=self.theme.palette.hotspot_border)
+
     def _open_editor(self, spec: HotspotSpec) -> None:
-        """Open an inline Spinbox editor for the given hotspot."""
+        self._focus_spec(spec)
+        if self._editor is not None:
+            self._destroy_editor()
+        current = self.model.get_value(spec.path)
+        value = float(current) if isinstance(current, (int, float)) else spec.min_value
+        var = tk.DoubleVar(value=value)
 
-        self._close_editor()
-        current_value = self._get_numeric_value(spec)
-        var = tk.StringVar(value=self._format_value(current_value, spec))
+        def _commit() -> None:
+            try:
+                new_value = float(var.get())
+            except (TypeError, tk.TclError):
+                return
+            new_value = max(spec.min_value, min(spec.max_value, new_value))
+            self.model.set_value(spec.path, round(new_value, spec.decimals) if spec.decimals else float(new_value))
+            self._destroy_editor()
+
+        bbox = self.bbox(self._hotspot_rects[spec.path])
+        if not bbox:
+            return
+        x = (bbox[0] + bbox[2]) / 2
+        y = bbox[1] - 24
         editor = ttk.Spinbox(
             self,
             from_=spec.min_value,
             to=spec.max_value,
             increment=spec.step,
-            format=f"%.{spec.decimals}f",
             textvariable=var,
-            width=12,
-            justify="center",
+            width=8,
         )
-        x1, y1, x2, y2 = spec.bbox
-        editor.place(x=x1 + 4, y=y2 - 26, width=x2 - x1 - 8, height=22)
+        editor.bind("<Return>", lambda _e: _commit())
+        editor.bind("<Escape>", lambda _e: self._destroy_editor())
+        editor.bind("<FocusOut>", lambda _e: _commit())
+
+        window_id = self.create_window(x, y, window=editor, anchor="s")
+        self._editor = editor
+        self._editor_window_id = window_id
         editor.focus_set()
 
-        def commit(*_args: object) -> None:
-            try:
-                raw_value = float(editor.get())
-            except ValueError:
-                self.bell()
-                return
-            clamped = min(max(raw_value, spec.min_value), spec.max_value)
-            self._set_value(spec.path, clamped)
-            self._on_change(spec.path, clamped)
-            self.update_case_values()
-            self._close_editor()
-
-        def cancel(*_args: object) -> None:
-            self._close_editor()
-
-        editor.bind("<Return>", commit)
-        editor.bind("<KP_Enter>", commit)
-        editor.bind("<FocusOut>", commit)
-        editor.bind("<Escape>", cancel)
-        self._editor = editor
-
-    def _close_editor(self) -> None:
+    def _destroy_editor(self) -> None:
         if self._editor is not None:
             self._editor.destroy()
             self._editor = None
-
-    def _show_hotspot_help(self, spec: HotspotSpec) -> None:
-        message = (
-            f"{spec.label_en} / {spec.label_ko}\n"
-            f"Range: {spec.min_value:.3f} – {spec.max_value:.3f} {spec.unit}\n"
-            f"Step: {spec.step}"
-        )
-        messagebox.showinfo("Hotspot Info", message, parent=self)
-
-    def _get_numeric_value(self, spec: HotspotSpec) -> float:
-        value = self._get_value(spec.path)
-        if isinstance(value, (int, float)):
-            return float(value)
-        return float(spec.min_value)
+        if self._editor_window_id is not None:
+            self.delete(self._editor_window_id)
+            self._editor_window_id = None
 
     # ------------------------------------------------------------------
-    # Value and overlay updates
+    # Warning overlays
     # ------------------------------------------------------------------
-    def update_case_values(self) -> None:
-        """Refresh hotspot labels to reflect the current case data."""
-
-        for spec, widgets in self._hotspot_items.items():
-            value = self._get_value(spec.path)
-            if value is None:
-                text = "—"
-                color = COLORS["warning_text"]
-            elif isinstance(value, (int, float)):
-                numeric = float(value)
-                text = self._format_value(numeric, spec)
-                if numeric < spec.min_value or numeric > spec.max_value:
-                    color = COLORS["warning_text"]
-                else:
-                    color = COLORS["value_text"]
-            else:
-                text = str(value)
-                color = COLORS["value_text"]
-            self.itemconfig(widgets["value"], text=f"{text} {spec.unit}".strip())
-            self.itemconfig(widgets["value"], fill=color)
-
-    def clear_results(self) -> None:
-        """Remove dynamic overlays and reset node colours."""
-
-        for item_id in self._overlay_items:
-            self.delete(item_id)
+    def _clear_overlays(self) -> None:
+        for item in self._overlay_items:
+            self.delete(item)
         self._overlay_items.clear()
-        for name, shape_id in self._node_shapes.items():
-            fill = self._default_fills.get(name, COLORS["overlay_bg"])
-            self.itemconfig(shape_id, fill=fill)
+        if self._progress_item is not None:
+            self.delete(self._progress_item)
+            self._progress_item = None
+        palette = self.theme.palette
+        self.itemconfig(self._node_shapes["gt"], outline=palette.block_outline, fill=palette.gt_fill)
+        self.itemconfig(self._node_shapes["hrsg"], outline=palette.block_outline, fill=palette.hrsg_fill)
+        for node in ("st_hp", "st_ip", "st_lp"):
+            self.itemconfig(self._node_shapes[node], outline=palette.block_outline, fill=palette.st_fill)
+        self.itemconfig(self._node_shapes["condenser"], outline=palette.block_outline, fill=palette.cond_fill)
 
-    def update_results(
-        self,
-        result: Mapping[str, Any] | None,
-        warnings: Sequence[str] | None = None,
-    ) -> None:
-        """Overlay solver results on the diagram."""
-
-        self.clear_results()
-        if not result:
-            return
+    def _render_results(self, result: dict[str, Any], warnings: Iterable[str]) -> None:
+        self._clear_overlays()
+        palette = self.theme.palette
+        fonts = self.theme.fonts
 
         gt = result.get("gt_block", {})
         hrsg = result.get("hrsg_block", {})
@@ -722,26 +314,26 @@ class DiagramCanvas(tk.Canvas):
         mass_balance = result.get("mass_energy_balance", {})
 
         if not hrsg.get("converged", True):
-            self.itemconfig(self._node_shapes["hrsg"], fill=COLORS["warning_fill"])
+            self.itemconfig(self._node_shapes["hrsg"], outline=palette.critical_outline, fill=palette.critical_fill)
         if not mass_balance.get("converged", True):
-            self.itemconfig(self._node_shapes["st_hp"], fill=COLORS["warning_fill"])
-            self.itemconfig(self._node_shapes["st_ip"], fill=COLORS["warning_fill"])
-            self.itemconfig(self._node_shapes["st_lp"], fill=COLORS["warning_fill"])
-            self.itemconfig(self._node_shapes["condenser"], fill=COLORS["warning_fill"])
+            for node in ("st_hp", "st_ip", "st_lp", "condenser"):
+                self.itemconfig(self._node_shapes[node], outline=palette.critical_outline, fill=palette.critical_fill)
 
-        if warnings:
-            warning_text = "\n".join(warnings)
-            self._overlay_items.append(
-                self.create_text(
-                    40,
-                    420,
-                    text=f"Warnings:\n{warning_text}",
-                    anchor="sw",
-                    fill=COLORS["warning_text"],
-                    font=FONTS["overlay"],
-                    justify="left",
-                )
-            )
+        warning_messages = list(warnings)
+        for message in warning_messages:
+            severity = _severity_from_warning(message)
+            node = _node_from_warning(message)
+            color_outline = palette.critical_outline if severity == "critical" else palette.warning_outline
+            color_fill = palette.critical_fill if severity == "critical" else palette.warning_fill
+            if node == "gt":
+                self.itemconfig(self._node_shapes["gt"], outline=color_outline, fill=color_fill)
+            elif node == "hrsg":
+                self.itemconfig(self._node_shapes["hrsg"], outline=color_outline, fill=color_fill)
+            elif node == "st":
+                for target in ("st_hp", "st_ip", "st_lp"):
+                    self.itemconfig(self._node_shapes[target], outline=color_outline, fill=color_fill)
+            elif node == "condenser":
+                self.itemconfig(self._node_shapes["condenser"], outline=color_outline, fill=color_fill)
 
         self._overlay_items.append(
             self.create_text(
@@ -753,8 +345,8 @@ class DiagramCanvas(tk.Canvas):
                     f"Exhaust: {gt.get('exhaust', {}).get('temp_C', 0):.0f}°C"
                 ),
                 anchor="n",
-                font=FONTS["overlay"],
-                fill=COLORS["text_secondary"],
+                font=fonts.overlay,
+                fill=palette.text_secondary,
                 justify="center",
             )
         )
@@ -770,8 +362,8 @@ class DiagramCanvas(tk.Canvas):
                     f"Stack {hrsg.get('stack_temp_C', 0):.0f}°C"
                 ),
                 anchor="n",
-                font=FONTS["overlay"],
-                fill=COLORS["text_secondary"],
+                font=fonts.overlay,
+                fill=palette.text_secondary,
                 justify="center",
             )
         )
@@ -787,8 +379,8 @@ class DiagramCanvas(tk.Canvas):
                     f"ST Gen: {st.get('electric_power_MW', 0):.1f} MW"
                 ),
                 anchor="n",
-                font=FONTS["overlay"],
-                fill=COLORS["text_secondary"],
+                font=fonts.overlay,
+                fill=palette.text_secondary,
                 justify="center",
             )
         )
@@ -798,35 +390,176 @@ class DiagramCanvas(tk.Canvas):
                 600,
                 360,
                 text=(
-                    f"Heat Rejected: {condenser.get('heat_rejected_MW', 0):.1f} MW\n"
-                    f"CW Out: {condenser.get('cw_outlet_C', 0):.1f}°C"
+                    f"Condenser Q: {condenser.get('heat_rejection_MW', 0):.1f} MW\n"
+                    f"Vacuum: {condenser.get('vacuum_kPa_abs', 0):.2f} kPa\n"
+                    f"NET MW: {summary.get('NET_power_MW', 0):.1f}"
                 ),
                 anchor="n",
-                font=FONTS["overlay"],
-                fill=COLORS["text_secondary"],
+                font=fonts.overlay,
+                fill=palette.text_secondary,
                 justify="center",
             )
         )
 
-        self._overlay_items.append(
-            self.create_text(
-                520,
-                40,
-                text=(
-                    f"Net Power: {summary.get('NET_power_MW', 0):.1f} MW\n"
-                    f"Net Eff.: {summary.get('NET_eff_LHV_pct', 0):.1f}%\n"
-                    f"Closure: {mass_balance.get('closure_error_pct', 0):.2f}%"
-                ),
-                anchor="n",
-                font=FONTS["overlay"],
-                fill=COLORS["text_primary"],
-                justify="center",
+        if warning_messages:
+            combined = "\n".join(f"• {msg}" for msg in warning_messages)
+            color = palette.critical_outline if any(_severity_from_warning(m) == "critical" for m in warning_messages) else palette.warning_outline
+            self._overlay_items.append(
+                self.create_text(
+                    40,
+                    420,
+                    text=f"Warnings:\n{combined}",
+                    anchor="sw",
+                    font=fonts.overlay,
+                    fill=color,
+                    justify="left",
+                )
             )
+
+    # ------------------------------------------------------------------
+    # Zoom & pan
+    # ------------------------------------------------------------------
+    def _on_zoom(self, event: tk.Event) -> None:
+        factor = 1.1 if event.delta > 0 else 0.9
+        self._apply_zoom(event.x, event.y, factor)
+
+    def _on_zoom_button(self, event: tk.Event) -> None:
+        factor = 1.1 if event.num == 4 else 0.9
+        self._apply_zoom(event.x, event.y, factor)
+
+    def _apply_zoom(self, x: float, y: float, factor: float) -> None:
+        new_scale = self._scale_factor * factor
+        if new_scale < 0.6 or new_scale > 1.8:
+            return
+        self.scale("all", x, y, factor, factor)
+        self._scale_factor = new_scale
+        if self._editor is not None:
+            self._destroy_editor()
+
+    def _on_space_press(self, _event: tk.Event) -> None:
+        self._panning = True
+
+    def _on_space_release(self, _event: tk.Event) -> None:
+        self._panning = False
+
+    def _on_button_press(self, event: tk.Event) -> None:
+        if self._panning:
+            self.scan_mark(event.x, event.y)
+
+    def _on_mouse_drag(self, event: tk.Event) -> None:
+        if self._panning:
+            self.scan_dragto(event.x, event.y, gain=1)
+
+    def _on_button_release(self, _event: tk.Event) -> None:
+        pass
+
+    # ------------------------------------------------------------------
+    # Event handlers
+    # ------------------------------------------------------------------
+    def _on_primary_click(self, event: tk.Event) -> None:
+        self.focus_set()
+        item = self.find_withtag("current")
+        if not item:
+            return
+        for spec in HOTSPOTS:
+            if self._hotspot_rects[spec.path] == item[0] or self._hotspot_labels[spec.path] == item[0] or self._value_items[spec.path] == item[0]:
+                self._focus_spec(spec)
+                break
+
+    def _on_activate_hotspot(self, _event: tk.Event) -> None:
+        if self._focused_index is None:
+            return
+        self._open_editor(HOTSPOTS[self._focused_index])
+
+    def _on_focus_next(self, event: tk.Event) -> str:
+        if self._focused_index is None:
+            self._focus_spec(HOTSPOTS[0])
+        else:
+            next_index = (self._focused_index + 1) % len(HOTSPOTS)
+            self._focus_spec(HOTSPOTS[next_index])
+        return "break"
+
+    def _on_focus_prev(self, event: tk.Event) -> str:
+        if self._focused_index is None:
+            self._focus_spec(HOTSPOTS[-1])
+        else:
+            prev_index = (self._focused_index - 1) % len(HOTSPOTS)
+            self._focus_spec(HOTSPOTS[prev_index])
+        return "break"
+
+    def _on_focus_activate(self, _event: tk.Event) -> str:
+        if self._focused_index is not None:
+            self._open_editor(HOTSPOTS[self._focused_index])
+        return "break"
+
+    def _on_case_loaded(self, case: dict[str, Any], **_: Any) -> None:
+        self._refresh_all_values()
+        self._destroy_editor()
+
+    def _on_value_changed(self, path: PathTuple, **_: Any) -> None:
+        for spec in HOTSPOTS:
+            if spec.path == path:
+                self._update_value_text(spec)
+                break
+
+    def _on_result_updated(self, result: dict[str, Any], warnings: Iterable[str], **_: Any) -> None:
+        self._render_results(result, warnings)
+
+    def _on_result_cleared(self, **_: Any) -> None:
+        self._clear_overlays()
+
+    def _on_progress(self, step: str | None, value: float, **_: Any) -> None:
+        if self._progress_item is not None:
+            self.delete(self._progress_item)
+            self._progress_item = None
+        if step is None:
+            return
+        progress_text = f"{step}: {int(value * 100)}%"
+        self._progress_item = self.create_text(
+            1040,
+            440,
+            text=progress_text,
+            anchor="se",
+            font=self.theme.fonts.overlay,
+            fill=self.theme.palette.text_secondary,
         )
 
     # ------------------------------------------------------------------
-    # Utility helpers
+    # Theme updates
     # ------------------------------------------------------------------
-    @staticmethod
-    def _format_value(value: float, spec: HotspotSpec) -> str:
-        return f"{value:.{spec.decimals}f}"
+    def apply_theme(self, theme: Theme) -> None:
+        self.theme = theme
+        self.configure(background=theme.palette.canvas_bg)
+        self._clear_overlays()
+        for node, shape in self._node_shapes.items():
+            fill = {
+                "gt": theme.palette.gt_fill,
+                "hrsg": theme.palette.hrsg_fill,
+                "st_hp": theme.palette.st_fill,
+                "st_ip": theme.palette.st_fill,
+                "st_lp": theme.palette.st_fill,
+                "condenser": theme.palette.cond_fill,
+            }[node]
+            self.itemconfig(shape, fill=fill, outline=theme.palette.block_outline, width=theme.metrics.block_outline_width)
+        for spec in HOTSPOTS:
+            rect_id = self._hotspot_rects[spec.path]
+            self.itemconfig(rect_id, fill=theme.palette.hotspot_bg, outline=theme.palette.hotspot_border, width=theme.metrics.hotspot_border_width)
+            self.itemconfig(self._hotspot_labels[spec.path], fill=theme.palette.text_primary, font=theme.fonts.label)
+            self.itemconfig(self._value_items[spec.path], fill=theme.palette.value_text, font=theme.fonts.value)
+        self._refresh_all_values()
+
+    # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
+    def destroy(self) -> None:  # pragma: no cover - Tkinter shutdown path
+        for unsubscribe in self._subscriptions:
+            try:
+                unsubscribe()
+            except Exception:
+                continue
+        self._subscriptions.clear()
+        self._destroy_editor()
+        super().destroy()
+
+
+__all__ = ["DiagramCanvas", "HOTSPOTS", "HotspotSpec"]
