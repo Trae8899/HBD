@@ -89,6 +89,36 @@ CLI와 동일한 파이프라인을 Tkinter 기반 GUI로도 제공한다. GUI�
 
 GUI를 통해 입력-출력 관계를 빠르게 검토하고, 계산 과정(trace)도 즉시 확인할 수 있다.
 
+### 1.4 GUI 입력 필드 설명
+
+입력 탭에는 영문 레이블과 함께 한국어 설명이 병기되어 있으며, 각 값의 단위와 의미는 아래와 같다.
+
+- **Ambient**
+  - `Dry-bulb temperature (°C)` – 외기 건구 온도.
+  - `Relative humidity (%)` – 외기 상대습도(0~100%).
+  - `Ambient pressure (bar abs)` – 현장 대기압(절대압 기준).
+- **Gas Turbine**
+  - `GT model` – 가스터빈 기기 모델명.
+  - `ISO gross power (MW)` – ISO 조건(15°C, 60%RH, 1.013 bar)에서의 정격 발전기출력.
+  - `ISO heat rate (kJ/kWh)` – ISO 조건에서의 열소비율(저위발열량 기준).
+  - `Fuel LHV (kJ/kg)` – 사용 연료의 저위발열량(LHV). 천연가스는 약 48,000~50,000 kJ/kg 범위.
+  - `ISO exhaust temp (°C)` – ISO 조건의 배기가스 온도.
+  - `ISO exhaust flow (kg/s)` – ISO 조건의 배기가스 질량유량.
+  - `ΔPower (%/K)` – 외기 온도 변화 1K 당 전기출력 변화율.
+  - `ΔFlow (%/K)` – 외기 온도 변화 1K 당 배기가스 유량 변화율.
+  - `ΔExhaust temp (K/K)` – 외기 온도 변화 1K 당 배기가스 온도 변화량.
+- **HRSG**
+  - 각 압력 레벨(HP/IP/LP)의 `pressure`, `steam temp`, `pinch`, `approach` 값은 각각 증기 압력, 과열온도, pinch temperature difference, approach temperature difference를 의미한다.
+  - `Minimum stack temp (°C)` – 굴뚝 최소 허용 배출 온도.
+- **Steam Turbine**
+  - `HP/IP/LP isentropic efficiency` – 각 압력단 증기터빈의 등엔트로피 효율(0~1).
+  - `Mechanical & generator efficiency` – 터빈축 → 발전기까지의 기계/전기 효율.
+- **Condenser**
+  - `Condenser vacuum (kPa abs)` – 복수기 내부 절대압.
+  - `Cooling water inlet (°C)` – 복수기 순환수 입구온도.
+- **Balance of Plant**
+  - `Auxiliary load (MW)` – 플랜트 자체 전력 소비량(AUX load).
+
 ---
 
 ## 2. 단위·기준
@@ -132,6 +162,15 @@ GUI를 통해 입력-출력 관계를 빠르게 검토하고, 계산 과정(trac
 - 모든 블록을 통과한 뒤, 전체 질량/에너지 밸런스 에러율(`closure_error_pct`)을 계산한다.
 - 허용 기준: 0.5% 이하.
 - 초과일 경우 `mass_energy_balance.converged=false`.
+
+### 3.3 주요 계산식
+
+- **연료 열투입 (Fuel heat input)**: `fuel_heat_input_MW_LHV = ISO_heat_rate_kJ_per_kWh × GT_electric_power_MW / 3600`.
+- **연료 질량유량 (Fuel flow)**: 연료 LHV가 입력된 경우 `fuel_flow_kg_s = fuel_heat_input_MW_LHV × 1000 / fuel_LHV_kJ_per_kg`.
+- **Net 전력**: `NET_power_MW = GT_power_MW + ST_power_MW - AUX_load_MW`.
+- **Net 효율 (%LHV)**: `NET_eff_LHV_pct = (NET_power_MW / fuel_heat_input_MW_LHV) × 100`.
+- **질량/에너지 밸런스 오차**: `closure_error_pct = |fuel_heat_input_MW_LHV - (GT_power_MW + ST_power_MW + condenser_heat_MW)| / fuel_heat_input_MW_LHV × 100`.
+- **경고 조건**: `closure_error_pct > 0.5%` 또는 HRSG 수렴 실패 시 `mass_energy_balance.converged = false`로 기록한다.
 
 ---
 

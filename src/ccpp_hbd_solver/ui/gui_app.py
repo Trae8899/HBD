@@ -28,6 +28,7 @@ class FieldItem:
     path: Sequence[str]
     label: str
     field_type: str = "float"
+    help_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -39,51 +40,181 @@ class SectionItem:
 
 INPUT_LAYOUT: Dict[str, Sequence[FieldItem | SectionItem]] = {
     "Ambient": (
-        FieldItem(("ambient", "Ta_C"), "Dry-bulb temperature (°C)"),
-        FieldItem(("ambient", "RH_pct"), "Relative humidity (%)"),
-        FieldItem(("ambient", "P_bar"), "Ambient pressure (bar abs)"),
+        FieldItem(
+            ("ambient", "Ta_C"),
+            "Dry-bulb temperature (°C)",
+            help_text="외기 건구 온도. 사이트 설계 조건을 섭씨 온도로 입력합니다.",
+        ),
+        FieldItem(
+            ("ambient", "RH_pct"),
+            "Relative humidity (%)",
+            help_text="외기 상대습도. 0~100% 범위의 값을 입력합니다.",
+        ),
+        FieldItem(
+            ("ambient", "P_bar"),
+            "Ambient pressure (bar abs)",
+            help_text="현장 대기압. 절대압(bar abs) 기준으로 입력합니다.",
+        ),
     ),
     "Gas Turbine": (
-        FieldItem(("gas_turbine", "model"), "GT model", field_type="str"),
-        FieldItem(("gas_turbine", "ISO_power_MW"), "ISO gross power (MW)"),
-        FieldItem(("gas_turbine", "ISO_heat_rate_kJ_per_kWh"), "ISO heat rate (kJ/kWh)"),
-        FieldItem(("gas_turbine", "ISO_exhaust_temp_C"), "ISO exhaust temp (°C)"),
-        FieldItem(("gas_turbine", "ISO_exhaust_flow_kg_s"), "ISO exhaust flow (kg/s)"),
+        FieldItem(
+            ("gas_turbine", "model"),
+            "GT model",
+            field_type="str",
+            help_text="가스터빈 기기 모델명 또는 구분자입니다.",
+        ),
+        FieldItem(
+            ("gas_turbine", "ISO_power_MW"),
+            "ISO gross power (MW)",
+            help_text="ISO 조건(15°C, 60%RH, 1.013 bar)에서의 정격 발전기출력(MW).",
+        ),
+        FieldItem(
+            ("gas_turbine", "ISO_heat_rate_kJ_per_kWh"),
+            "ISO heat rate (kJ/kWh)",
+            help_text="ISO 조건에서의 열소비율(저위발열량 기준 kJ/kWh).", 
+        ),
+        FieldItem(
+            ("gas_turbine", "fuel_LHV_kJ_per_kg"),
+            "Fuel LHV (kJ/kg)",
+            help_text="연료 저위발열량(LHV). 천연가스의 경우 약 48,000~50,000 kJ/kg 입니다.",
+        ),
+        FieldItem(
+            ("gas_turbine", "ISO_exhaust_temp_C"),
+            "ISO exhaust temp (°C)",
+            help_text="ISO 조건에서 측정된 배기가스 온도.",
+        ),
+        FieldItem(
+            ("gas_turbine", "ISO_exhaust_flow_kg_s"),
+            "ISO exhaust flow (kg/s)",
+            help_text="ISO 조건에서 배기가스 질량유량(kg/s).",
+        ),
         SectionItem("Temperature correction"),
-        FieldItem(("gas_turbine", "corr_coeff", "dPower_pct_per_K"), "ΔPower (%/K)"),
-        FieldItem(("gas_turbine", "corr_coeff", "dFlow_pct_per_K"), "ΔFlow (%/K)"),
-        FieldItem(("gas_turbine", "corr_coeff", "dExhT_K_per_K"), "ΔExhaust temp (K/K)"),
+        FieldItem(
+            ("gas_turbine", "corr_coeff", "dPower_pct_per_K"),
+            "ΔPower (%/K)",
+            help_text="외기 온도 변화 1K 당 전기출력 변화율(%).",
+        ),
+        FieldItem(
+            ("gas_turbine", "corr_coeff", "dFlow_pct_per_K"),
+            "ΔFlow (%/K)",
+            help_text="외기 온도 변화 1K 당 배기가스 유량 변화율(%).",
+        ),
+        FieldItem(
+            ("gas_turbine", "corr_coeff", "dExhT_K_per_K"),
+            "ΔExhaust temp (K/K)",
+            help_text="외기 온도 변화 1K 당 배기가스 온도 변화량(K).",
+        ),
     ),
     "HRSG": (
         SectionItem("High pressure level"),
-        FieldItem(("hrsg", "hp", "pressure_bar"), "HP pressure (bar abs)"),
-        FieldItem(("hrsg", "hp", "steam_temp_C"), "HP steam temp (°C)"),
-        FieldItem(("hrsg", "hp", "pinch_K"), "HP pinch (K)"),
-        FieldItem(("hrsg", "hp", "approach_K"), "HP approach (K)"),
+        FieldItem(
+            ("hrsg", "hp", "pressure_bar"),
+            "HP pressure (bar abs)",
+            help_text="HP 증기 드럼 압력 또는 터빈 입구 압력(bar abs).",
+        ),
+        FieldItem(
+            ("hrsg", "hp", "steam_temp_C"),
+            "HP steam temp (°C)",
+            help_text="HP 증기 과열온도(°C).",
+        ),
+        FieldItem(
+            ("hrsg", "hp", "pinch_K"),
+            "HP pinch (K)",
+            help_text="HP 증발부 pinch temperature difference(K).",
+        ),
+        FieldItem(
+            ("hrsg", "hp", "approach_K"),
+            "HP approach (K)",
+            help_text="HP 드럼 급수온도와 포화온도 간 온도차(approach).",
+        ),
         SectionItem("Intermediate pressure level"),
-        FieldItem(("hrsg", "ip", "pressure_bar"), "IP pressure (bar abs)"),
-        FieldItem(("hrsg", "ip", "steam_temp_C"), "IP steam temp (°C)"),
-        FieldItem(("hrsg", "ip", "pinch_K"), "IP pinch (K)"),
-        FieldItem(("hrsg", "ip", "approach_K"), "IP approach (K)"),
+        FieldItem(
+            ("hrsg", "ip", "pressure_bar"),
+            "IP pressure (bar abs)",
+            help_text="IP 증기 압력(bar abs).",
+        ),
+        FieldItem(
+            ("hrsg", "ip", "steam_temp_C"),
+            "IP steam temp (°C)",
+            help_text="IP 증기 과열온도(°C).",
+        ),
+        FieldItem(
+            ("hrsg", "ip", "pinch_K"),
+            "IP pinch (K)",
+            help_text="IP 증발부 pinch temperature difference(K).",
+        ),
+        FieldItem(
+            ("hrsg", "ip", "approach_K"),
+            "IP approach (K)",
+            help_text="IP 드럼 approach temperature difference(K).",
+        ),
         SectionItem("Low pressure level"),
-        FieldItem(("hrsg", "lp", "pressure_bar"), "LP pressure (bar abs)"),
-        FieldItem(("hrsg", "lp", "steam_temp_C"), "LP steam temp (°C)"),
-        FieldItem(("hrsg", "lp", "pinch_K"), "LP pinch (K)"),
-        FieldItem(("hrsg", "lp", "approach_K"), "LP approach (K)"),
-        FieldItem(("hrsg", "stack_temp_min_C"), "Minimum stack temp (°C)"),
+        FieldItem(
+            ("hrsg", "lp", "pressure_bar"),
+            "LP pressure (bar abs)",
+            help_text="LP 증기 압력(bar abs).",
+        ),
+        FieldItem(
+            ("hrsg", "lp", "steam_temp_C"),
+            "LP steam temp (°C)",
+            help_text="LP 증기 과열온도(°C).",
+        ),
+        FieldItem(
+            ("hrsg", "lp", "pinch_K"),
+            "LP pinch (K)",
+            help_text="LP 증발부 pinch temperature difference(K).",
+        ),
+        FieldItem(
+            ("hrsg", "lp", "approach_K"),
+            "LP approach (K)",
+            help_text="LP 드럼 approach temperature difference(K).",
+        ),
+        FieldItem(
+            ("hrsg", "stack_temp_min_C"),
+            "Minimum stack temp (°C)",
+            help_text="굴뚝 배출 최소 허용온도. 이 값 이하로 떨어지면 경보를 발생합니다.",
+        ),
     ),
     "Steam Turbine": (
-        FieldItem(("steam_turbine", "isentropic_eff_hp"), "HP isentropic efficiency"),
-        FieldItem(("steam_turbine", "isentropic_eff_ip"), "IP isentropic efficiency"),
-        FieldItem(("steam_turbine", "isentropic_eff_lp"), "LP isentropic efficiency"),
-        FieldItem(("steam_turbine", "mech_elec_eff"), "Mechanical & generator efficiency"),
+        FieldItem(
+            ("steam_turbine", "isentropic_eff_hp"),
+            "HP isentropic efficiency",
+            help_text="HP 터빈 단 등엔트로피 효율(0~1).",
+        ),
+        FieldItem(
+            ("steam_turbine", "isentropic_eff_ip"),
+            "IP isentropic efficiency",
+            help_text="IP 터빈 단 등엔트로피 효율(0~1).",
+        ),
+        FieldItem(
+            ("steam_turbine", "isentropic_eff_lp"),
+            "LP isentropic efficiency",
+            help_text="LP 터빈 단 등엔트로피 효율(0~1).",
+        ),
+        FieldItem(
+            ("steam_turbine", "mech_elec_eff"),
+            "Mechanical & generator efficiency",
+            help_text="증기터빈 축에서 발전기까지의 기계 및 전기 효율.",
+        ),
     ),
     "Condenser": (
-        FieldItem(("condenser", "vacuum_kPa_abs"), "Condenser vacuum (kPa abs)"),
-        FieldItem(("condenser", "cw_inlet_C"), "Cooling water inlet (°C)"),
+        FieldItem(
+            ("condenser", "vacuum_kPa_abs"),
+            "Condenser vacuum (kPa abs)",
+            help_text="복수기 내부 진공 절대압(kPa abs).",
+        ),
+        FieldItem(
+            ("condenser", "cw_inlet_C"),
+            "Cooling water inlet (°C)",
+            help_text="복수기 순환수 입구온도(°C).",
+        ),
     ),
     "Balance of Plant": (
-        FieldItem(("bop", "aux_load_MW"), "Auxiliary load (MW)"),
+        FieldItem(
+            ("bop", "aux_load_MW"),
+            "Auxiliary load (MW)",
+            help_text="발전소 자체 사용 전력(AUX load) 추정치(MW).",
+        ),
     ),
 }
 
@@ -104,6 +235,7 @@ class HBDGuiApp:
 
         self.style = ttk.Style()
         self.style.configure("Section.TLabel", font=("TkDefaultFont", 10, "bold"))
+        self.style.configure("Help.TLabel", font=("TkDefaultFont", 9), foreground="#555555")
 
         self.defaults = load_defaults()
         self.current_case_path: Path | None = None
@@ -169,17 +301,28 @@ class HBDGuiApp:
 
                 key = ".".join(item.path)
                 label = ttk.Label(frame, text=item.label)
-                label.grid(row=row, column=0, sticky="w", pady=2, padx=(0, 6))
+                label.grid(row=row, column=0, sticky="w", pady=(6, 0), padx=(0, 6))
 
                 var = tk.StringVar()
                 width = 28 if item.field_type == "str" else 18
                 entry = ttk.Entry(frame, textvariable=var, width=width)
-                entry.grid(row=row, column=1, sticky="we", pady=2)
+                entry.grid(row=row, column=1, sticky="we", pady=(6, 0))
 
                 self.field_vars[key] = var
                 self.field_types[key] = item.field_type
                 self.field_paths[key] = item.path
                 row += 1
+
+                if item.help_text:
+                    help_label = ttk.Label(
+                        frame,
+                        text=item.help_text,
+                        style="Help.TLabel",
+                        wraplength=320,
+                        justify="left",
+                    )
+                    help_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 6))
+                    row += 1
 
     def _build_output_panel(self, container: ttk.Frame) -> None:
         notebook = ttk.Notebook(container)

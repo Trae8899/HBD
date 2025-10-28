@@ -31,6 +31,7 @@ HBD Agent는 단일 JSON(케이스 파일)을 입력으로 받는다. 예시는 
 - 모든 온도는 °C, 압력은 bar(abs) 또는 kPa(abs)로 명확히 표기.
 - 절대압 단위 변수명은 `_abs` 또는 `_kPa_abs` 등으로 명시.
 - 유량은 kg/s, 전력은 MW, 효율은 소수(0~1).
+- 가스터빈 입력에는 `ISO_heat_rate_kJ_per_kWh`와 함께 연료 LHV(`fuel_LHV_kJ_per_kg`)를 제공하면 연료 질량유량을 계산해 리포트한다.
 
 ### 2.2 출력(Result Dict)
 
@@ -47,6 +48,8 @@ HBD Agent는 계산 후 아래 형태의 dict을 반환해야 한다:
   },
   "gt_block": {
     "fuel_heat_input_MW_LHV": 665.0,
+    "fuel_LHV_kJ_per_kg": 49000.0,
+    "fuel_flow_kg_s": 13.6,
     "exhaust": {
       "temp_C": 605.0,
       "flow_kg_s": 640.0
@@ -120,7 +123,7 @@ HBD Agent는 계산 후 아래 형태의 dict을 반환해야 한다:
 HBD Agent는 다음 절차를 항상 같은 순서로 수행한다.
 각 단계는 별도 모듈 함수로 구현되고, 전역 mutable 상태 없이 입력→출력만 주고받는다.
 
-1. **Step GT (Gas Turbine Block)** – 외기조건 보정 후 GT 출력, 연료열 투입, 배기가스 조건 산출.
+1. **Step GT (Gas Turbine Block)** – 외기조건 보정 후 GT 출력, 연료 열투입(LHV 기준)과 연료 질량유량, 배기가스 조건 산출.
 2. **Step HRSG (3-Pressure Heat Recovery Steam Generator)** – HP/IP/LP 증기유량을 반복 수렴.
 3. **Step ST (Steam Turbine Block)** – 각 섹션에서 등엔트로피 효율을 적용해 출력 계산.
 4. **Step Condenser / Feedwater Loop** – 복수기 열부하와 냉각수 조건 산출.
