@@ -1,0 +1,53 @@
+{
+  "ambient": {
+    "Ta_C": 35.0,
+    "RH_pct": 55.0,
+    "P_bar": 1.005
+  },
+  "gas_turbine": {
+    "model": "GTX-400",
+    "ISO_power_MW": 270.0,
+    "ISO_heat_rate_kJ_per_kWh": 10000.0,
+    "ISO_exhaust_temp_C": 610.0,
+    "ISO_exhaust_flow_kg_s": 650.0,
+    "corr_coeff": {
+      "dPower_pct_per_K": -0.30,
+      "dFlow_pct_per_K": -0.15,
+      "dExhT_K_per_K": 0.50
+    }
+  },
+  "hrsg": {
+    "hp": {
+      "pressure_bar": 120.0,
+      "steam_temp_C": 565.0,
+      "pinch_K": 10.0,
+      "approach_K": 5.0
+    },
+    "ip": {
+      "pressure_bar": 30.0,
+      "steam_temp_C": 565.0,
+      "pinch_K": 12.0,
+      "approach_K": 7.0
+    },
+    "lp": {
+      "pressure_bar": 5.0,
+      "steam_temp_C": 250.0,
+      "pinch_K": 15.0,
+      "approach_K": 10.0
+    },
+    "stack_temp_min_C": 90.0
+  },
+  "steam_turbine": {
+    "isentropic_eff_hp": 0.88,
+    "isentropic_eff_ip": 0.88,
+    "isentropic_eff_lp": 0.88,
+    "mech_elec_eff": 0.985
+  },
+  "condenser": {
+    "vacuum_kPa_abs": 8.0,
+    "cw_inlet_C": 20.0
+  },
+  "bop": {
+    "aux_load_MW": 5.0
+  }
+}
