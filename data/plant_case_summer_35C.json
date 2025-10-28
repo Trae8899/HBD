@@ -8,6 +8,7 @@
     "model": "GTX-400",
     "ISO_power_MW": 270.0,
     "ISO_heat_rate_kJ_per_kWh": 10000.0,
+    "fuel_LHV_kJ_per_kg": 49000.0,
     "ISO_exhaust_temp_C": 610.0,
     "ISO_exhaust_flow_kg_s": 650.0,
     "corr_coeff": {
