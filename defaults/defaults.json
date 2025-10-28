@@ -1,4 +1,10 @@
 {
+  "_notes": {
+    "steam_turbine": "Derived from ASME PTC 6 baseline efficiencies (docs/case_schema_v0.3.md#steam-turbine-defaults)",
+    "hrsg": "Baseline pinch/approach from vendor concept study (docs/case_schema_v0.3.md#hrsg-defaults)",
+    "condenser": "Cooling water references per EPRI 2015 (docs/case_schema_v0.3.md#condenser-defaults)",
+    "bop": "Auxiliary load assumption per project charter (docs/case_schema_v0.3.md#bop-defaults)"
+  },
   "steam_turbine": {
     "isentropic_eff_hp": 0.88,
     "isentropic_eff_ip": 0.88,

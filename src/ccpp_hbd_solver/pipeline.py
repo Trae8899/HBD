@@ -16,6 +16,7 @@ from .gt_block.gt_solver import solve_gt_block
 from .hrsg_block.hrsg_solver import solve_hrsg_block
 from .plant_summary.plant_summary import summarize_plant
 from .st_block.st_solver import solve_steam_turbine
+from .utils.warnings import format_warning
 
 
 DEFAULTS_PATH = Path("defaults/defaults.json")
@@ -87,12 +88,17 @@ def run_pipeline(
         if cancel_event is not None and cancel_event.is_set():
             raise PipelineCancelled()
 
+    units_system = case_data.get("units_system", "SI_IF97")
+    if units_system != "SI_IF97":
+        raise ValueError(f"Unsupported units_system '{units_system}' - expected 'SI_IF97'")
+
     ambient = case_data.get("ambient", {})
     gas_turbine = case_data.get("gas_turbine", {})
     hrsg_spec = case_data.get("hrsg", {})
     steam_turbine_spec = case_data.get("steam_turbine", {})
     condenser_spec = case_data.get("condenser", {})
     bop_spec = case_data.get("bop", {})
+    case_constraints = case_data.get("case_constraints", {})
 
     _check_cancel()
     ambient_trace = apply_site_corrections(ambient, gas_turbine.get("corr_coeff", {}))
@@ -114,6 +120,7 @@ def run_pipeline(
             "gt_exhaust": gt_result["exhaust"],
             "hrsg": hrsg_spec,
             "ambient": ambient,
+            "case_constraints": case_constraints,
         }
     )
     _notify("HRSG", 0.50)
@@ -157,6 +164,15 @@ def run_pipeline(
     )
     _notify("Summary", 1.0)
 
+    vendor_notes = gt_trace.get("vendor_notes", [])
+    meta_warnings = []
+    if vendor_notes:
+        meta_warnings.extend(format_warning("GT_VENDOR_CURVE_MISSING", note) for note in vendor_notes)
+    if hrsg_result.get("warnings"):
+        meta_warnings.extend(str(w) for w in hrsg_result["warnings"])
+    if summary_trace.get("warnings"):
+        meta_warnings.extend(summary_trace.get("warnings", []))
+
     result = {
         "summary": summary,
         "gt_block": gt_result,
@@ -169,7 +185,7 @@ def run_pipeline(
             "input_case": summary_trace["meta"].get("input_case"),
             "solver_commit": summary_trace["meta"].get("solver_commit"),
             "timestamp_utc": summary_trace["meta"].get("timestamp_utc"),
-            "warnings": summary_trace.get("warnings", []),
+            "warnings": meta_warnings,
         },
     }
 

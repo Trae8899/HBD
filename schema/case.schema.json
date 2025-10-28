@@ -1,20 +1,37 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hbd.example.com/schema/case.schema.json",
-  "title": "CCPP HBD Case Schema v0.2",
-  "description": "Schema definition for fixed/vary/device based CCPP HBD case files.",
+  "title": "CCPP HBD Case Schema v0.3",
+  "description": "Schema definition for fixed/vary/device based CCPP HBD case files (v0.3)",
   "type": "object",
-  "required": ["fixed"],
+  "required": [
+    "schema_version",
+    "units_system",
+    "fixed"
+  ],
   "additionalProperties": false,
   "properties": {
-    "version": {
-      "type": "string",
-      "description": "Optional semantic version tag for the case schema.",
-      "enum": ["0.2"]
+    "schema_version": {
+      "const": "0.3",
+      "description": "Case schema version. Only v0.3 is supported by this release."
     },
-    "fixed": {"$ref": "#/definitions/fixedBlock"},
-    "vary": {"$ref": "#/definitions/varyBlock"},
-    "devices": {"$ref": "#/definitions/deviceList"},
+    "units_system": {
+      "type": "string",
+      "enum": ["SI_IF97"],
+      "description": "Global unit system flag (SI with IAPWS-IF97 steam properties)."
+    },
+    "fixed": {
+      "$ref": "#/definitions/fixedBlock"
+    },
+    "vary": {
+      "$ref": "#/definitions/varyBlock"
+    },
+    "devices": {
+      "$ref": "#/definitions/deviceList"
+    },
+    "constraints": {
+      "$ref": "#/definitions/caseConstraints"
+    },
     "meta": {
       "type": "object",
       "description": "Optional metadata describing author, site, or notes.",
@@ -40,6 +57,7 @@
     "fixedBlock": {
       "type": "object",
       "required": [
+        "plant",
         "ambient",
         "gas_turbine",
         "hrsg",
@@ -49,6 +67,24 @@
       ],
       "additionalProperties": false,
       "properties": {
+        "plant": {
+          "type": "object",
+          "required": ["topology"],
+          "additionalProperties": false,
+          "properties": {
+            "topology": {
+              "type": "string",
+              "enum": [
+                "single-shaft-1x1",
+                "multi-shaft-2x1",
+                "multi-shaft-3x1"
+              ]
+            },
+            "site_name": {
+              "type": "string"
+            }
+          }
+        },
         "ambient": {
           "type": "object",
           "required": ["Ta_C", "RH_pct", "P_bar"],
@@ -123,6 +159,10 @@
               ],
               "additionalProperties": false,
               "properties": {
+                "reference_temp_C": {
+                  "type": "number",
+                  "default": 15.0
+                },
                 "dPower_pct_per_K": {
                   "type": "number",
                   "minimum": -1.0,
@@ -139,6 +179,9 @@
                   "maximum": 2.0
                 }
               }
+            },
+            "performance_blend": {
+              "$ref": "#/definitions/performanceBlend"
             }
           }
         },
@@ -159,6 +202,12 @@
               "type": "number",
               "minimum": 70.0,
               "maximum": 150.0
+            },
+            "constraints": {
+              "$ref": "#/definitions/hrsgConstraint"
+            },
+            "devices": {
+              "$ref": "#/definitions/hrsgDevices"
             }
           }
         },
@@ -236,44 +285,135 @@
         }
       }
     },
+    "hrsgConstraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pinch_mode": {
+          "type": "string",
+          "enum": ["enforce", "relax"],
+          "default": "enforce"
+        },
+        "approach_mode": {
+          "type": "string",
+          "enum": ["enforce", "relax"],
+          "default": "enforce"
+        },
+        "stack_mode": {
+          "type": "string",
+          "enum": ["enforce", "relax"],
+          "default": "enforce"
+        }
+      }
+    },
+    "hrsgDevices": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "duct_burner": {
+          "$ref": "#/definitions/ductBurnerDevice"
+        },
+        "bypass": {
+          "$ref": "#/definitions/bypassDevice"
+        },
+        "attemperators": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/attemperatorDevice"},
+          "default": []
+        }
+      }
+    },
+    "ductBurnerDevice": {
+      "type": "object",
+      "required": ["duty_MW"],
+      "additionalProperties": false,
+      "properties": {
+        "duty_MW": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 200.0
+        },
+        "stack_temp_cap_C": {
+          "type": "number",
+          "minimum": 90.0,
+          "maximum": 200.0
+        }
+      }
+    },
+    "bypassDevice": {
+      "type": "object",
+      "required": ["fraction"],
+      "additionalProperties": false,
+      "properties": {
+        "fraction": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 0.5
+        }
+      }
+    },
+    "attemperatorDevice": {
+      "type": "object",
+      "required": ["target", "steam_temp_C"],
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": "string",
+          "enum": ["hp", "ip", "lp"]
+        },
+        "steam_temp_C": {
+          "type": "number",
+          "minimum": 200.0,
+          "maximum": 620.0
+        },
+        "m_dot_max_kg_s": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 20.0,
+          "default": 5.0
+        }
+      }
+    },
+    "performanceBlend": {
+      "type": "object",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["linear", "vendor_blend"]
+        },
+        "vendor_curve_id": {
+          "type": "string"
+        },
+        "blend_weight": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 1.0
+        }
+      }
+    },
+    "caseConstraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allow_relaxed_pinch": {
+          "type": "boolean",
+          "default": false
+        },
+        "allow_relaxed_stack": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
     "varyBlock": {
       "type": "object",
       "description": "Optional set of sweep axes using dotted key paths.",
       "default": {},
       "propertyNames": {
-        "enum": [
-          "ambient.Ta_C",
-          "ambient.RH_pct",
-          "ambient.P_bar",
-          "gas_turbine.ISO_power_MW",
-          "gas_turbine.ISO_heat_rate_kJ_per_kWh",
-          "gas_turbine.ISO_exhaust_temp_C",
-          "gas_turbine.ISO_exhaust_flow_kg_s",
-          "gas_turbine.fuel_LHV_kJ_per_kg",
-          "gas_turbine.corr_coeff.dPower_pct_per_K",
-          "gas_turbine.corr_coeff.dFlow_pct_per_K",
-          "gas_turbine.corr_coeff.dExhT_K_per_K",
-          "hrsg.hp.pressure_bar",
-          "hrsg.hp.steam_temp_C",
-          "hrsg.hp.pinch_K",
-          "hrsg.hp.approach_K",
-          "hrsg.ip.pressure_bar",
-          "hrsg.ip.steam_temp_C",
-          "hrsg.ip.pinch_K",
-          "hrsg.ip.approach_K",
-          "hrsg.lp.pressure_bar",
-          "hrsg.lp.steam_temp_C",
-          "hrsg.lp.pinch_K",
-          "hrsg.lp.approach_K",
-          "hrsg.stack_temp_min_C",
-          "steam_turbine.isentropic_eff_hp",
-          "steam_turbine.isentropic_eff_ip",
-          "steam_turbine.isentropic_eff_lp",
-          "steam_turbine.mech_elec_eff",
-          "condenser.vacuum_kPa_abs",
-          "condenser.cw_inlet_C",
-          "bop.aux_load_MW"
-        ]
+        "pattern": "^(ambient|gas_turbine|hrsg|steam_turbine|condenser|bop|plant)\\."
       },
       "additionalProperties": {
         "type": "array",

@@ -62,12 +62,19 @@ def _prepare_case(case_data: dict[str, Any], case_path: Path) -> dict[str, Any]:
     if "fixed" in case_data:
         fixed_case = copy.deepcopy(case_data["fixed"])
         fixed_meta = dict(base_meta)
-        fixed_meta.setdefault("case_schema_version", str(case_data.get("version", "0.2")))
+        fixed_meta.setdefault(
+            "case_schema_version",
+            str(case_data.get("schema_version", case_data.get("version", "0.3"))),
+        )
         if case_data.get("devices"):
             fixed_meta["declared_devices"] = copy.deepcopy(case_data["devices"])
         if case_data.get("vary"):
             fixed_meta["declared_vary_axes"] = list(case_data["vary"].keys())
         fixed_case["meta"] = fixed_meta
+        fixed_case["case_constraints"] = copy.deepcopy(case_data.get("constraints", {}))
+        fixed_case["declared_devices"] = copy.deepcopy(case_data.get("devices", []))
+        fixed_case["schema_version"] = case_data.get("schema_version", case_data.get("version"))
+        fixed_case["units_system"] = case_data.get("units_system", "SI_IF97")
         return fixed_case
 
     legacy_case = copy.deepcopy(case_data)

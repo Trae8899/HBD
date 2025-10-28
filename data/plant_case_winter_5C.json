@@ -1,53 +1,90 @@
 {
-  "version": "0.2",
+  "schema_version": "0.3",
+  "units_system": "SI_IF97",
   "fixed": {
+    "plant": {
+      "topology": "multi-shaft-2x1",
+      "site_name": "Winter Reference"
+    },
     "ambient": {
       "Ta_C": 5.0,
-      "RH_pct": 60.0,
-      "P_bar": 1.013
+      "RH_pct": 65.0,
+      "P_bar": 1.02
     },
     "gas_turbine": {
       "model": "GTX-400",
-      "ISO_power_MW": 270.0,
-      "ISO_heat_rate_kJ_per_kWh": 10000.0,
+      "ISO_power_MW": 300.0,
+      "ISO_heat_rate_kJ_per_kWh": 9500.0,
       "fuel_LHV_kJ_per_kg": 49000.0,
-      "ISO_exhaust_temp_C": 610.0,
-      "ISO_exhaust_flow_kg_s": 650.0,
+      "ISO_exhaust_temp_C": 620.0,
+      "ISO_exhaust_flow_kg_s": 655.0,
       "corr_coeff": {
-        "dPower_pct_per_K": -0.3,
-        "dFlow_pct_per_K": 0.15,
-        "dExhT_K_per_K": 0.5
+        "reference_temp_C": 15.0,
+        "dPower_pct_per_K": -0.28,
+        "dFlow_pct_per_K": 0.12,
+        "dExhT_K_per_K": 0.55
+      },
+      "performance_blend": {
+        "mode": "vendor_blend",
+        "vendor_curve_id": "GTX-400-WINTER",
+        "blend_weight": 0.65
       }
     },
     "hrsg": {
       "hp": {
         "pressure_bar": 120.0,
         "steam_temp_C": 565.0,
-        "pinch_K": 10.0,
-        "approach_K": 5.0
+        "pinch_K": 9.0,
+        "approach_K": 4.0
       },
       "ip": {
         "pressure_bar": 30.0,
-        "steam_temp_C": 565.0,
-        "pinch_K": 12.0,
-        "approach_K": 7.0
+        "steam_temp_C": 540.0,
+        "pinch_K": 11.0,
+        "approach_K": 6.0
       },
       "lp": {
-        "pressure_bar": 5.0,
-        "steam_temp_C": 250.0,
-        "pinch_K": 15.0,
-        "approach_K": 10.0
+        "pressure_bar": 4.5,
+        "steam_temp_C": 240.0,
+        "pinch_K": 14.0,
+        "approach_K": 9.0
       },
-      "stack_temp_min_C": 90.0
+      "stack_temp_min_C": 95.0,
+      "constraints": {
+        "pinch_mode": "enforce",
+        "approach_mode": "enforce",
+        "stack_mode": "relax"
+      },
+      "devices": {
+        "duct_burner": {
+          "duty_MW": 0.0,
+          "stack_temp_cap_C": 130.0
+        },
+        "bypass": {
+          "fraction": 0.02
+        },
+        "attemperators": [
+          {
+            "target": "hp",
+            "steam_temp_C": 560.0,
+            "m_dot_max_kg_s": 3.5
+          },
+          {
+            "target": "ip",
+            "steam_temp_C": 535.0,
+            "m_dot_max_kg_s": 2.5
+          }
+        ]
+      }
     },
     "steam_turbine": {
-      "isentropic_eff_hp": 0.88,
+      "isentropic_eff_hp": 0.89,
       "isentropic_eff_ip": 0.88,
-      "isentropic_eff_lp": 0.88,
-      "mech_elec_eff": 0.985
+      "isentropic_eff_lp": 0.86,
+      "mech_elec_eff": 0.986
     },
     "condenser": {
-      "vacuum_kPa_abs": 6.0,
+      "vacuum_kPa_abs": 6.5,
       "cw_inlet_C": 15.0
     },
     "bop": {
@@ -55,5 +92,12 @@
     }
   },
   "vary": {},
-  "devices": []
+  "devices": [],
+  "constraints": {
+    "allow_relaxed_pinch": false,
+    "allow_relaxed_stack": true
+  },
+  "meta": {
+    "description": "Winter 5°C reference case"
+  }
 }
